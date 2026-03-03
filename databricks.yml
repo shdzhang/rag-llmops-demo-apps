@@ -1,0 +1,99 @@
+bundle:
+  name: "rag-llmops-demo-apps"
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog_name:
+    description: "UC catalog for this project"
+    default: "shidong_catalog"
+
+  schema_name:
+    description: "UC schema for this project"
+    default: "corp_affairs"
+
+  model_name:
+    description: "Name of the registered model"
+    default: "corp_chatbot"
+
+  app_name:
+    description: "Name of the Databricks App"
+    default: "corp-chatbot-app"
+
+  prompt_base_name:
+    description: "Base name for the MLflow Prompt Registry entry"
+    default: "rag_prompt"
+
+  vector_search_endpoint:
+    description: "Vector search endpoint name"
+    default: "corp_vs_endpoint"
+
+  llm_endpoint:
+    description: "Foundation model endpoint for the RAG agent"
+    default: "databricks-claude-sonnet-4-5"
+
+  judge_llm_endpoint:
+    description: "Foundation model endpoint for LLM-as-judge evaluation"
+    default: "databricks-claude-opus-4-1"
+
+  embedding_endpoint:
+    description: "Embedding model endpoint for Vector Search"
+    default: "databricks-gte-large-en"
+
+  experiment_name:
+    description: "MLflow experiment name"
+    default: "/Users/${workspace.current_user.userName}/${bundle.target}_${var.model_name}"
+
+resources:
+  experiments:
+    experiment:
+      name: ${var.experiment_name}
+
+  schemas:
+    corporate_schema:
+      name: ${var.schema_name}
+      catalog_name: ${var.catalog_name}
+
+  # The Databricks App that serves the agent
+  apps:
+    corp_chatbot_app:
+      name: ${var.app_name}
+      description: "Corporate Affairs RAG Chatbot - Databricks App with async AgentServer"
+      source_code_path: ./
+
+      resources:
+        # MLflow experiment for tracing
+        - name: "experiment"
+          experiment:
+            experiment_id: "${resources.experiments.experiment.id}"
+            permission: "CAN_MANAGE"
+
+        # LLM serving endpoint
+        - name: "llm-endpoint"
+          serving_endpoint:
+            name: ${var.llm_endpoint}
+            permission: "CAN_QUERY"
+
+        # Vector Search index (via UC securable)
+        - name: "vector-search-index"
+          uc_securable:
+            securable_full_name: "${var.catalog_name}.${var.schema_name}.docs_index"
+            securable_type: "TABLE"
+            permission: "SELECT"
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://adb-984752964297111.11.azuredatabricks.net
+
+  prod:
+    mode: production
+    workspace:
+      host: https://adb-984752964297111.11.azuredatabricks.net
+    resources:
+      apps:
+        corp_chatbot_app:
+          name: ${var.app_name}

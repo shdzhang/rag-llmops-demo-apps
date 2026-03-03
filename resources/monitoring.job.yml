@@ -1,0 +1,32 @@
+resources:
+  jobs:
+    monitoring:
+      name: "Production Monitoring"
+      queue:
+        enabled: true
+      parameters:
+        - name: "catalog_name"
+          default: "${var.catalog_name}"
+        - name: "schema_name"
+          default: "${resources.schemas.corporate_schema.name}"
+        - name: "model_name"
+          default: "${var.model_name}"
+        - name: "experiment_name"
+          default: "${resources.experiments.experiment.name}"
+        - name: "app_name"
+          default: "${var.app_name}"
+      tasks:
+        - task_key: monitoring_dashboard
+          notebook_task:
+            notebook_path: ../notebooks/09_monitoring_dashboard.py
+            base_parameters:
+              catalog_name: "{{job.parameters.catalog_name}}"
+              schema_name: "{{job.parameters.schema_name}}"
+              model_name: "{{job.parameters.model_name}}"
+              experiment_name: "{{job.parameters.experiment_name}}"
+              app_name: "{{job.parameters.app_name}}"
+      schedule:
+        quartz_cron_expression: "0 0 */6 * * ?"
+        timezone_id: "America/Los_Angeles"
+      tags:
+        Project: "${bundle.name}"

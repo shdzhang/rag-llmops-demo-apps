@@ -1,0 +1,238 @@
+# Company Culture and Values
+
+## Our Mission
+
+To empower organizations worldwide with innovative solutions that transform how they work, collaborate, and succeed.
+
+## Core Values
+
+### 1. Customer Obsession
+We start with the customer and work backwards. Every decision considers customer impact first.
+
+**In Practice:**
+- Monthly customer advisory board meetings
+- Customer NPS tracked and shared company-wide
+- "Customer Voice" award for employees who go above and beyond
+- Required annual customer visit for all employees
+
+### 2. Innovation and Experimentation
+We encourage bold ideas and learn from failures. Innovation isn't just for engineers—every role can innovate.
+
+**Innovation Programs:**
+- **Hack Weeks**: Quarterly week dedicated to passion projects
+- **Innovation Fund**: $50K grants for employee-led initiatives
+- **20% Time**: Spend one day per week on exploratory work
+- **Failure Celebration**: Monthly "Learning from Failures" showcase
+
+### 3. Inclusion and Belonging
+We build a diverse team where everyone feels valued and heard.
+
+**Diversity Metrics (2024):**
+- 45% women in workforce (53% in leadership)
+- 40% underrepresented minorities
+- 15% LGBTQ+ employees
+- Employees from 35+ countries
+
+**Employee Resource Groups (ERGs):**
+- Women in Tech
+- Pride Alliance
+- Black Excellence
+- Asian & Pacific Islander Network
+- Veterans and Allies
+- Parents and Caregivers
+- Neurodiversity Network
+
+Each ERG receives $10K annual budget and executive sponsor.
+
+### 4. Transparency and Trust
+We default to open communication and assume positive intent.
+
+**Transparency Practices:**
+- All-hands meetings every Friday (CEO Q&A)
+- Financial results shared quarterly with all employees
+- Anonymous "Ask Me Anything" channel for leadership
+- Open salary bands published internally
+- Board meeting notes shared (where legally permissible)
+
+### 5. Sustainable Excellence
+We prioritize long-term success over short-term gains. Work-life balance is non-negotiable.
+
+**Work-Life Balance:**
+- No expectation to work evenings or weekends
+- "No Meeting Fridays" for focus time
+- Company-wide shutdowns: Last week of December and first week of July
+- Mental health days encouraged (3 per year, no questions asked)
+- "Unplug and Recharge" $1,000 annual vacation bonus (must disconnect fully)
+
+## Communication Culture
+
+### How We Work
+
+**Async-First**
+- Written documentation preferred over meetings
+- 24-hour response time expectation (not immediate)
+- Record meetings for global team members
+- Use Loom videos for updates
+
+**Meeting Culture**
+- Default to 25 or 50-minute meetings (not 30/60)
+- Agendas required for all meetings over 15 minutes
+- "No agenda, no attenda" policy
+- Meeting-free blocks: 9-10 AM and 2-3 PM daily
+
+**Decision-Making**
+- RAPID framework: Recommend, Agree, Perform, Input, Decide
+- Documented in Confluence with stakeholder DRI (Directly Responsible Individual)
+- "Disagree and commit" culture—voice concerns, then align
+
+### Communication Tools
+
+**When to Use What:**
+- **Slack**: Quick questions, urgent matters, social chatter
+- **Email**: External communication, formal requests, documentation
+- **Confluence**: Long-form docs, project plans, decisions
+- **Notion**: Team wikis, runbooks, onboarding docs
+- **Zoom**: Face-to-face conversations, brainstorming
+- **GitHub/JIRA**: Code reviews, bug tracking, sprint planning
+
+## Career Development
+
+### Growth Framework
+
+**Career Ladders**
+- Individual Contributor (IC) track: IC1 → IC2 → IC3 → IC4 → IC5 → IC6 (Principal/Fellow)
+- Management track: M1 (Manager) → M2 (Senior Manager) → M3 (Director) → M4 (VP) → M5 (SVP/C-level)
+- Switching tracks encouraged—no penalty for choosing IC over management
+
+**Promotion Philosophy**
+- Promote when already performing at next level (not potential)
+- Promotion packets reviewed by calibration committee
+- No forced curves—promote based on merit, not quotas
+- Target: 20-30% of employees promoted annually
+
+### Learning and Development
+
+**Required Annual Training:**
+- 40 hours of learning per year
+- Managers: +20 hours of leadership training
+
+**Learning Resources:**
+- $1,500 personal learning budget
+- Access to O'Reilly Learning, Pluralsight, Coursera
+- Internal "Lunch and Learn" series (weekly)
+- Mentorship program (optional)
+- Executive coaching (Director level and above)
+
+## Recognition and Rewards
+
+### Peer Recognition
+- **Kudos System**: Public praise in Slack with points (redeemable for gift cards)
+- **Quarterly Awards**: $500 spot bonuses for exceptional work
+- **Annual Awards**: Employee of the Year ($5,000 + trip)
+
+### Compensation Philosophy
+- Pay competitively at 75th percentile of market
+- Annual merit increases (3-5% for meets expectations)
+- Equity grants for all employees (refreshed annually)
+- Transparent salary bands (published internally)
+- Geographic pay adjustments based on location
+
+### Bonus Structure
+- Company performance bonus: 0-20% of salary
+- Individual performance multiplier: 0.8x - 1.5x
+- Paid quarterly to align with company results
+
+## Work Environment
+
+### Office Design
+- Open floor plan with quiet rooms and phone booths
+- Standing desks for all employees
+- Ergonomic chairs and accessories
+- Dual monitors standard (can request triple)
+- Noise-canceling headphones provided
+
+### Remote Work
+- Hybrid-friendly: 2 days/week in office (core days: Tue/Thu)
+- Fully remote roles available for certain positions
+- Co-working space stipend: $200/month for remote employees
+- Home office stipend: $500 one-time + $100/month for internet
+
+### Sustainability
+We're committed to carbon neutrality by 2030:
+- LEED Platinum certified offices
+- Renewable energy for all data centers
+- Carbon offset for employee travel
+- Electric vehicle charging stations (free)
+- Bike-to-work incentive: $100/month
+
+## Social Responsibility
+
+### Corporate Giving
+- **Matching Gifts**: Company matches donations up to $5,000/year
+- **Volunteer Time Off**: 3 days/year for volunteering
+- **Pro Bono Work**: 5% of engineering capacity for nonprofits
+- **Foundation**: Company foundation donates 1% of profits to education and climate initiatives
+
+### Supplier Diversity
+- 30% of procurement spend with diverse suppliers
+- Annual supplier diversity awards
+
+## Health and Wellness
+
+### Wellness Programs
+- On-site gym and fitness classes (free)
+- Wellness reimbursement: $500/year (gym, fitness classes, sports equipment)
+- Standing desk converters available
+- Healthy snacks and meals (subsidized)
+- Annual flu shots and biometric screenings
+- Mental health resources: Unlimited therapy via Modern Health
+
+### Parenting Support
+- Generous parental leave (16 weeks primary, 4 weeks secondary)
+- On-site childcare center (subsidized 50%)
+- $5,000 adoption assistance
+- Lactation rooms in all offices
+- Backup childcare service (20 days/year free)
+
+## Employee Feedback
+
+We measure culture through:
+- **Quarterly Pulse Surveys**: 5-minute check-ins
+- **Annual Engagement Survey**: Deep dive on culture, leadership, growth
+- **Exit Interviews**: Learn from departing employees
+- **Stay Interviews**: Proactively understand what keeps employees engaged
+
+**Current Scores (2024):**
+- Employee NPS: +65 (top quartile)
+- Engagement Score: 82%
+- Would Recommend: 91%
+- Retention Rate: 93% (7% voluntary attrition)
+
+## Living Our Values
+
+### How We Hire
+- Values-based interviews (30% of interview criteria)
+- Diverse interview panels required
+- Structured interviews with rubrics
+- "No brilliant jerks" policy—values are non-negotiable
+
+### How We Handle Conflicts
+- Address issues directly with involved parties first
+- Escalate to manager if unresolved
+- HR mediation available
+- Anonymous ethics hotline for serious concerns
+
+### How We Celebrate
+- Monthly birthday celebrations
+- Quarterly team offsites
+- Annual company retreat (all-expenses-paid)
+- Milestone celebrations (anniversaries, launches, wins)
+
+## Questions?
+
+**Culture Questions**: culture@company.com
+**ERG Membership**: diversity@company.com
+**Wellness Programs**: wellness@company.com
+**Recognition Nominations**: recognition@company.com
+
+Remember: Culture is built by everyone, every day. Your actions matter!

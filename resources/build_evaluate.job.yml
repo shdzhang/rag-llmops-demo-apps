@@ -1,0 +1,58 @@
+resources:
+  jobs:
+    build_evaluate:
+      name: "Build and Evaluate Agent"
+      queue:
+        enabled: true
+      parameters:
+        - name: "catalog_name"
+          default: "${var.catalog_name}"
+        - name: "schema_name"
+          default: "${resources.schemas.corporate_schema.name}"
+        - name: "model_name"
+          default: "${resources.registered_models.corporate_chatbot.name}"
+        - name: "experiment_name"
+          default: "${resources.experiments.experiment.name}"
+        - name: "llm_endpoint"
+          default: "${var.llm_endpoint}"
+        - name: "judge_llm_endpoint"
+          default: "${var.judge_llm_endpoint}"
+        - name: "vector_search_endpoint"
+          default: "${var.vector_search_endpoint}"
+        - name: "prompt_base_name"
+          default: "${var.prompt_base_name}"
+      tasks:
+        - task_key: prompt_registry
+          notebook_task:
+            notebook_path: ../notebooks/03_prompt_engineering.py
+            base_parameters:
+              catalog_name: "{{job.parameters.catalog_name}}"
+              schema_name: "{{job.parameters.schema_name}}"
+              llm_endpoint: "{{job.parameters.llm_endpoint}}"
+              prompt_base_name: "{{job.parameters.prompt_base_name}}"
+        - task_key: agent_build
+          depends_on:
+            - task_key: prompt_registry
+          notebook_task:
+            notebook_path: ../notebooks/04_agent_build.py
+            base_parameters:
+              catalog_name: "{{job.parameters.catalog_name}}"
+              schema_name: "{{job.parameters.schema_name}}"
+              model_name: "{{job.parameters.model_name}}"
+              experiment_name: "{{job.parameters.experiment_name}}"
+              llm_endpoint: "{{job.parameters.llm_endpoint}}"
+              prompt_base_name: "{{job.parameters.prompt_base_name}}"
+        - task_key: agent_evaluation
+          depends_on:
+            - task_key: agent_build
+          notebook_task:
+            notebook_path: ../notebooks/05_agent_evaluation.py
+            base_parameters:
+              catalog_name: "{{job.parameters.catalog_name}}"
+              schema_name: "{{job.parameters.schema_name}}"
+              model_name: "{{job.parameters.model_name}}"
+              experiment_name: "{{job.parameters.experiment_name}}"
+              judge_llm_endpoint: "{{job.parameters.judge_llm_endpoint}}"
+              vector_search_endpoint: "{{job.parameters.vector_search_endpoint}}"
+      tags:
+        Project: "${bundle.name}"

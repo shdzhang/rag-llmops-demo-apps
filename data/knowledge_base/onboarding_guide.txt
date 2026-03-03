@@ -1,0 +1,189 @@
+# New Employee Onboarding Guide
+
+Welcome to our company! This guide will help you navigate your first 90 days.
+
+## Pre-Start Checklist (Before Day 1)
+
+You should receive these emails before your start date:
+
+1. **IT Setup Email** (1 week before)
+   - Instructions to set up laptop and accounts
+   - VPN credentials
+   - Badge pickup location
+
+2. **Welcome Email from HR** (3 days before)
+   - First day agenda
+   - Parking information
+   - What to bring (ID documents for I-9 verification)
+
+3. **Manager Introduction** (1 day before)
+   - Meet your onboarding buddy
+   - First week schedule
+
+## Day 1 Schedule
+
+**8:30 AM - Badge Pickup**
+- Security desk in main lobby
+- Bring government-issued photo ID
+
+**9:00 AM - Welcome Session**
+- Meet HR team
+- Complete paperwork (I-9, W-4, benefits enrollment)
+- Receive welcome kit
+
+**10:30 AM - IT Onboarding**
+- Laptop setup and configuration
+- Email and Slack account activation
+- VPN and SSO setup
+- Software installations
+
+**12:00 PM - Team Lunch**
+- Hosted by your manager
+- Meet your immediate team
+
+**2:00 PM - Workspace Tour**
+- Office layout and amenities
+- Conference room booking
+- Kitchen and break areas
+
+**3:00 PM - First Team Meeting**
+- Introduction to team members
+- Overview of current projects
+- Q&A session
+
+**4:30 PM - End of Day Check-in**
+- Brief meeting with manager
+- Questions and next steps
+
+## First Week Priorities
+
+### Required Training (Complete by End of Week 1)
+
+All training is available in the Learning Management System (LMS):
+
+1. **Information Security** (1 hour)
+   - Data classification and handling
+   - Password policies
+   - Phishing awareness
+
+2. **Code of Conduct** (30 minutes)
+   - Company values
+   - Ethics and compliance
+   - Reporting concerns
+
+3. **Workplace Safety** (30 minutes)
+   - Emergency procedures
+   - Health and safety policies
+
+4. **Diversity and Inclusion** (45 minutes)
+   - Inclusive workplace practices
+   - Anti-harassment policies
+
+### System Access Requests
+
+Submit requests through IT Service Portal for:
+- GitHub/GitLab repository access
+- AWS/Azure/GCP accounts (if applicable)
+- Salesforce, JIRA, Confluence
+- Department-specific tools
+
+Processing time: 1-2 business days
+
+### Meet Your Onboarding Buddy
+
+Your buddy is your go-to person for:
+- Answering "simple" questions
+- Navigating office culture
+- Introducing you to key people
+- Coffee chats and informal advice
+
+Schedule weekly check-ins for your first month.
+
+## First Month Goals
+
+### Week 2-3: Learning Phase
+- Shadow team members in daily work
+- Review past projects and documentation
+- Attend team standups and meetings
+- Start contributing to low-priority tasks
+
+### Week 4: First Assignment
+- Receive your first project assignment
+- Set 30-60-90 day goals with manager
+- Schedule 1:1s with stakeholders
+- Join relevant Slack channels and email lists
+
+## First 90 Days Milestones
+
+### 30 Days
+- Complete all required training
+- Understand team structure and key projects
+- Deliver first small contribution
+- First check-in with HR
+
+### 60 Days
+- Own a small project end-to-end
+- Build relationships across teams
+- Propose improvements or ideas
+- Mid-point check-in with manager
+
+### 90 Days
+- Fully ramped on core responsibilities
+- Delivering at expected level
+- Formal review with manager
+- Transition from "onboarding" to "fully integrated"
+
+## Key Resources
+
+### Communication Tools
+- **Email**: firstname.lastname@company.com
+- **Slack**: Primary communication tool
+- **Zoom**: Video conferencing
+- **Confluence**: Documentation and wikis
+
+### Employee Resources
+- **HR Portal**: https://hr.company.com
+- **IT Support**: it-help@company.com or Slack #it-support
+- **Learning Portal**: https://learning.company.com
+- **Expense Reimbursement**: Expensify app
+
+### Building Access
+- **Main Office**: Badge access 24/7
+- **Conference Rooms**: Book via Outlook or Robin app
+- **Parking**: Parking garage Level 2-4 (Level 1 is visitor parking)
+- **Bike Storage**: Basement level, badge required
+
+### Office Amenities
+- **Cafeteria**: 11:30 AM - 1:30 PM (subsidized lunch)
+- **Coffee/Snacks**: Available on each floor (free)
+- **Gym**: Lower level (free membership, 24/7 access)
+- **Wellness Room**: Quiet space for meditation, nursing, etc.
+
+## Frequently Asked Questions
+
+**Q: When do I get paid?**
+A: Bi-weekly on Fridays. Your first paycheck will be 2-3 weeks after start date.
+
+**Q: How do I request time off?**
+A: Use WorkdayHR to submit PTO requests. Manager approval required.
+
+**Q: What if I need to work from home?**
+A: Notify your manager via Slack. No formal request needed for occasional remote work.
+
+**Q: How do I submit expenses?**
+A: Use Expensify app. Reimbursement within 2 weeks of submission.
+
+**Q: Who do I contact for benefits questions?**
+A: Email benefits@company.com or Slack #ask-hr
+
+**Q: What's the dress code?**
+A: Business casual. Jeans are OK. Dress up for client meetings.
+
+## Need Help?
+
+**Onboarding Issues**: onboarding@company.com
+**IT Problems**: Slack #it-support or it-help@company.com
+**HR Questions**: Slack #ask-hr or hr@company.com
+**Facilities**: Slack #facilities or facilities@company.com
+
+Welcome aboard! We're excited to have you on the team.
