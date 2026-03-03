@@ -25,25 +25,20 @@ logging.getLogger("mlflow.utils.autologging_utils").setLevel(logging.ERROR)
 # need to import agent for our @invoke-registered function to be found
 from agent_server import agent  # noqa: F401
 
-# Create your evaluation dataset
-# Refer to documentation for evaluations:
-# Scorers: https://docs.databricks.com/aws/en/mlflow3/genai/eval-monitor/concepts/scorers
-# Predefined LLM scorers: https://mlflow.org/docs/latest/genai/eval-monitor/scorers/llm-judge/predefined
-# Defining custom scorers: https://docs.databricks.com/aws/en/mlflow3/genai/eval-monitor/custom-scorers
 test_cases = [
     {
-        "goal": "Learn about the main dishes of Vietnamese cuisine",
-        "persona": "An impatient foodie who doesn't know much about Vietnamese cuisine.",
+        "goal": "Understand the remote work and home office policies",
+        "persona": "A new employee who just joined and wants to know about working from home.",
         "simulation_guidelines": [
-            "Initially explore the main influences of Vietnamese cuisine before the main dishes.",
+            "Ask about remote work eligibility first, then follow up about home office equipment.",
+            "Prefer short, direct questions",
         ],
     },
     {
-        "goal": "Figure out which prime numbers between 1 and 50 are also Fibonacci numbers",
-        "persona": "You are a math novice who has heard of prime numbers but doesn't know what Fibonacci numbers are.",
+        "goal": "Learn about parental leave and expense reimbursement",
+        "persona": "An employee planning for a growing family who also needs to submit recent travel expenses.",
         "simulation_guidelines": [
-            "Initially ask questions to understand the Fibonacci sequence before exploring which ones are prime.",
-            "Prefer short messages",
+            "Start with parental leave questions, then pivot to expense submission process.",
         ],
     },
 ]

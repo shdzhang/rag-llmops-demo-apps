@@ -2,7 +2,15 @@
 
 End-to-end LLMOps demonstration for a RAG chatbot agent deployed on **Databricks Apps**, showcasing the complete lifecycle from data preparation through production monitoring.
 
-Migrated from Model Serving (`ResponsesAgent` class with `agents.deploy()`) to Databricks Apps (async `@invoke`/`@stream` functions with `databricks bundle deploy`).
+## Apps LLMOps: The Key Insight
+
+In Databricks Apps, **source code is the deployment artifact** — not an MLflow model version. This eliminates the `log_model()` -> `register_model()` -> `promote @champion` -> `agents.deploy()` pipeline. Instead:
+
+```
+edit code  ->  evaluate(code)  ->  git commit  ->  bundle deploy
+```
+
+Prompts hot-reload via MLflow Prompt Registry (no redeploy needed). Quality gates run in NB04 and block deployment if thresholds fail.
 
 ## Key Features
 
@@ -11,48 +19,45 @@ Migrated from Model Serving (`ResponsesAgent` class with `agents.deploy()`) to D
 | **Agent Framework** | MLflow AgentServer with async `@invoke`/`@stream` |
 | **Prompt Management** | MLflow Prompt Registry with versioning and aliases |
 | **Retrieval** | Databricks Vector Search (managed embeddings + similarity search) |
-| **Evaluation** | `mlflow.genai.evaluate()` with built-in scorers |
+| **Evaluation** | `mlflow.genai.evaluate()` — evaluates agent code directly |
 | **Deployment** | Databricks Apps via Asset Bundles (`databricks bundle deploy`) |
-| **Auth** | App service principal + per-user authorization via `get_user_workspace_client()` |
+| **Auth** | App service principal + per-user authorization |
 | **Chat UI** | Built-in chat UI (streaming, markdown, authentication) |
-| **Monitoring** | MLflow External Monitor + tracing |
-| **Orchestration** | Databricks Asset Bundles (DABs) |
+| **Monitoring** | MLflow External Monitor + trace-based analytics |
+| **Orchestration** | Databricks Asset Bundles (DABs) + CI/CD |
 
 ## Project Structure
 
 ```
 rag-llmops-demo-apps/
-├── agent_server/                   # Agent server code (deployed as App)
+├── agent_server/                   # Agent code (deployed as App)
 │   ├── agent.py                    # Async @invoke/@stream agent with RAG
 │   ├── start_server.py             # AgentServer startup
-│   ├── utils.py                    # User auth helpers
-│   └── evaluate_agent.py           # Evaluation runner
+│   └── evaluate_agent.py           # Local evaluation runner (ConversationSimulator)
 ├── scripts/                        # Development scripts
 │   ├── quickstart.py               # Setup script (auth, env, experiment)
 │   └── start_app.py                # Local dev server launcher
-├── notebooks/                      # Databricks notebooks (run sequentially)
+├── notebooks/                      # Databricks notebooks
 │   ├── 01_data_ingestion.py        # Ingest documents to Delta
 │   ├── 02_vector_index_creation.py # Create Vector Search index
 │   ├── 03_prompt_engineering.py    # Register prompts in MLflow Prompt Registry
-│   ├── 04_agent_build.py           # Log agent to MLflow + UC for eval tracking
-│   ├── 05_agent_evaluation.py      # Evaluate with mlflow.genai.evaluate()
-│   ├── 06_model_registration.py    # Model governance (aliases, tags)
-│   ├── 07_app_deployment.py        # Deploy as Databricks App
-│   ├── 08_inference_testing.py     # App testing & latency benchmarks
-│   └── 09_monitoring_dashboard.py  # Production monitoring queries
+│   ├── 04_agent_evaluation.py      # Evaluate agent directly + quality gates
+│   ├── 05_inference_testing.py     # Post-deploy smoke tests (direct function import)
+│   └── 06_monitoring_dashboard.py  # Trace-based production monitoring
 ├── resources/                      # DAB resource definitions
-│   ├── model_artifacts.yml         # UC model, schema
 │   ├── data_preparation.job.yml    # Data pipeline job
-│   ├── build_evaluate.job.yml      # Build + evaluate pipeline job
-│   ├── deploy.job.yml              # App deployment job
-│   ├── monitoring.job.yml          # Scheduled monitoring job
-│   └── end_to_end.job.yml          # Orchestrator job (runs all stages)
-├── data/knowledge_base/            # Sample corporate documents
+│   ├── build_evaluate.job.yml      # Prompt + evaluate pipeline job
+│   └── monitoring.job.yml          # Smoke tests + monitoring job (scheduled)
+├── tests/                          # Unit tests
+│   └── test_agent_local.py         # Local agent function tests
 ├── docs/                           # Documentation
-├── app.yaml                        # Databricks App configuration
+│   ├── architecture.md             # Architecture overview + design decisions
+│   ├── deployment_guide.md         # Phased deployment + CI/CD guide
+│   └── troubleshooting_guide.md    # Known issues and fixes
+├── app.yaml                        # Databricks App runtime config
 ├── databricks.yml                  # DAB bundle configuration
 ├── pyproject.toml                  # Python dependencies
-├── requirements.txt                # "uv" (required for Apps runtime)
+├── requirements.txt                # "uv" bootstrap for Apps runtime
 └── README.md
 ```
 
@@ -64,7 +69,6 @@ rag-llmops-demo-apps/
 - Databricks CLI configured (`databricks auth login`)
 - Python 3.11+
 - `uv` package manager
-- Node.js 20+ (for chat UI)
 
 ### 1. Set Up Local Environment
 
@@ -80,32 +84,51 @@ uv run start-app
 # Open http://localhost:8000 for the chat UI
 ```
 
-### 3. Deploy to Databricks Apps
+### 3. Deploy to Databricks
 
 ```bash
-databricks bundle deploy -t dev
-databricks bundle run corp_chatbot_app -t dev
+databricks bundle deploy -t prod
+databricks bundle run corp_chatbot_app -t prod
 ```
 
-### 4. Run the Full Pipeline
+### 4. Run Individual Jobs
 
 ```bash
-databricks bundle run end_to_end -t dev
+databricks bundle run data_preparation -t prod   # Run once to set up data
+databricks bundle run build_evaluate -t prod      # Evaluate agent quality
+databricks bundle run monitoring -t prod          # Smoke tests + monitoring
 ```
 
 ## LLMOps Lifecycle
 
 ```
-Data Prep -> Prompt Registry -> Agent Build -> Evaluate -> Deploy App -> Test -> Monitor
-  (01, 02)      (03)              (04)         (05, 06)     (07)        (08)    (09)
+Data Prep            Develop & Evaluate      Deploy (CLI/CI-CD)      Monitor
+  (01, 02)             (03, 04)                                       (05, 06)
+  [run once]           [inner loop]           bundle deploy            [scheduled 6h]
+
+  Ingest docs,         Register prompts,      bundle deploy,          Smoke tests,
+  create VS index      evaluate quality       run app                 trace monitoring
 ```
 
-1. **Data Preparation**: Ingest docs, create Vector Search index
-2. **Prompt Engineering**: Register versioned prompts, set `@production` alias
-3. **Agent Build**: Log agent to MLflow + UC for evaluation tracking
-4. **Evaluation**: Run `mlflow.genai.evaluate()`, enforce quality gates
-5. **App Deployment**: Deploy as Databricks App with built-in Chat UI
-6. **Monitoring**: MLflow External Monitor (automated judges) + tracing
+### DAB Jobs
+
+| Job | Notebooks | When to run |
+|-----|-----------|-------------|
+| `data_preparation` | 01, 02 | Once, or when documents change |
+| `build_evaluate` | 03, 04 | Each code/prompt change (inner dev loop) |
+| `monitoring` | 05, 06 | Scheduled every 6h (post-deploy validation) |
+
+**Deployment is a CLI/CI/CD step**, not a DAB job. See [deployment guide](docs/deployment_guide.md) for CI/CD workflow.
+
+## What Changed from Model Serving
+
+| Before (Model Serving) | After (Apps) |
+|------------------------|--------------|
+| `mlflow.pyfunc.log_model()` -> register -> promote `@champion` | Edit code, evaluate, git commit |
+| `agents.deploy(model_name, version)` | `databricks bundle deploy` |
+| Inference tables for monitoring | MLflow traces via `autolog()` |
+| 4 DAB jobs (data, build, deploy, monitor) | 3 independent DAB jobs (data, evaluate, monitor) |
+| Old NB04-07 (log, register, deploy) | Removed — notebooks renumbered to 01-06 |
 
 ## Technologies
 
@@ -113,5 +136,5 @@ Data Prep -> Prompt Registry -> Agent Build -> Evaluate -> Deploy App -> Test ->
 - **Databricks Foundation Models**: Claude Sonnet 4.5 via AI Gateway
 - **Databricks Vector Search**: Managed embedding + retrieval
 - **Databricks Apps**: Async FastAPI server with built-in chat UI
-- **Unity Catalog**: Model registry, governance, permissions
+- **Unity Catalog**: Governance and permissions
 - **Databricks Asset Bundles**: Infrastructure as Code

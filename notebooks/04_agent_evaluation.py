@@ -1,68 +1,55 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 05 - Agent Evaluation with MLflow GenAI
+# MAGIC # 04 - Agent Evaluation with MLflow GenAI
 # MAGIC
-# MAGIC This notebook evaluates the RAG agent using **MLflow GenAI Evaluate**:
+# MAGIC Evaluates the RAG agent using **MLflow GenAI Evaluate**:
 # MAGIC 1. Creates an evaluation dataset
-# MAGIC 2. Loads the **actual agent** (`rag_agent.py`) from the candidate model logged in NB04
-# MAGIC 3. Applies built-in LLM-as-judge scorers against the real agent
-# MAGIC 4. Enforces quality gates for promotion
+# MAGIC 2. Imports the agent code **directly** from `agent_server/agent.py`
+# MAGIC 3. Applies built-in LLM-as-judge scorers
+# MAGIC 4. Enforces quality gates
+# MAGIC
+# MAGIC ## Apps LLMOps Model
+# MAGIC
+# MAGIC In the Apps deployment model, the agent code is the deployment artifact
+# MAGIC (deployed via `databricks bundle deploy`), not an MLflow model version.
+# MAGIC We evaluate the code directly — no `log_model()` / `load_model()` round-trip.
 
 # COMMAND ----------
 # MAGIC %pip install mlflow>=3.1 databricks-sdk databricks-agents databricks-vectorsearch databricks-openai pandas
-# MAGIC # databricks-openai is still required by rag_agent.py when loaded via mlflow.pyfunc.load_model
 # MAGIC %restart_python
 
 # COMMAND ----------
+import os
+import sys
 import mlflow
 import pandas as pd
 
 # --- Configuration (from DAB job parameters) ---
 CATALOG = dbutils.widgets.get("catalog_name")
 SCHEMA = dbutils.widgets.get("schema_name")
-MODEL_NAME = dbutils.widgets.get("model_name")
 EXPERIMENT_NAME = dbutils.widgets.get("experiment_name")
 
 JUDGE_LLM_ENDPOINT = dbutils.widgets.get("judge_llm_endpoint")
 VS_ENDPOINT = dbutils.widgets.get("vector_search_endpoint")
 
-UC_MODEL_NAME = f"{CATALOG}.{SCHEMA}.{MODEL_NAME}"
-
-# Use the same experiment as notebook 04 so all runs are grouped together
 mlflow.set_registry_uri("databricks-uc")
 mlflow.set_experiment(EXPERIMENT_NAME)
 
-# LLM judge URI — "databricks:/" prefix required by MLflow GenAI scorers.
-# Combined with reduced scorers (1 instead of 3) and 8 test cases, this keeps
-# evaluation under 15-20 minutes.
 JUDGE_LLM = f"databricks:/{JUDGE_LLM_ENDPOINT}"
 
-# Quality gates (metric names match scorer output keys)
-# Additional quality checks (tone, citation, safety) run in production via NB09 External Monitor.
 QUALITY_THRESHOLDS = {
-    "correctness": 0.5,         # 50% of responses must be correct
+    "correctness": 0.5,
 }
 
 print(f"MLflow version: {mlflow.__version__}")
-print(f"Evaluating: {UC_MODEL_NAME}@candidate")
 print(f"Judge LLM: {JUDGE_LLM}")
 
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## Step 1: Prepare Evaluation Dataset
-# MAGIC
-# MAGIC Uses `mlflow.genai.datasets` to create a tracked evaluation dataset.
 
 # COMMAND ----------
 
-# Define test cases with expected outputs (ground truth).
-# Key principle: expected responses should state the ESSENTIAL FACTS only.
-# The Correctness scorer checks whether the agent's answer is semantically
-# consistent with the expected response. Overly detailed expectations cause
-# false negatives because the judge penalises any missing detail.
-#
-# Questions are written the way real employees would ask them --
-# informal, sometimes vague, sometimes with typos or extra context.
 eval_data = [
     # --- Remote Work Policy ---
     {
@@ -144,20 +131,17 @@ eval_df.head()
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Step 2: Load the Actual Agent and Define Predict Function
+# MAGIC ## Step 2: Pre-flight Check & Import Agent
 # MAGIC
-# MAGIC We load the **real agent** (`rag_agent.py`) from the candidate model logged in
-# MAGIC NB04 — the exact same code that will be deployed to production. This ensures
-# MAGIC evaluation tests the real code path, not a reimplementation.
+# MAGIC We import the agent code directly from `agent_server/agent.py` — the exact
+# MAGIC same code that runs in the deployed Databricks App. No `log_model()` /
+# MAGIC `load_model()` round-trip needed.
 
 # COMMAND ----------
 
 import time
 from databricks.vector_search.client import VectorSearchClient
 
-# --- Pre-flight: verify Vector Search index has data ---
-# TRIGGERED indexes don't auto-sync. If the index is empty we trigger a sync
-# ourselves and wait for it to complete (up to 15 min total).
 VS_INDEX = f"{CATALOG}.{SCHEMA}.docs_index"
 _vsc = VectorSearchClient(disable_notice=True)
 _vs_index = _vsc.get_index(endpoint_name=VS_ENDPOINT, index_name=VS_INDEX)
@@ -179,9 +163,8 @@ for _attempt in range(30):
                 try:
                     _vs_index.sync()
                     _sync_triggered = True
-                    print(f"  Sync triggered. Waiting for data to appear...")
                 except Exception as _se:
-                    print(f"  Sync trigger skipped ({_se}) - may already be in progress")
+                    print(f"  Sync trigger skipped ({_se})")
                     _sync_triggered = True
             else:
                 print(f"  Still 0 rows - waiting 30s (attempt {_attempt + 1})")
@@ -190,75 +173,83 @@ for _attempt in range(30):
     time.sleep(30)
 else:
     raise RuntimeError(
-        f"Vector Search index {VS_INDEX} has no data after 15 minutes. "
-        "Check the source table and Delta Sync pipeline status."
+        f"Vector Search index {VS_INDEX} has no data after 15 minutes."
     )
 
 # COMMAND ----------
 
-# Load the actual agent model logged by NB04 (candidate version)
-_loaded_model = mlflow.pyfunc.load_model(f"models:/{UC_MODEL_NAME}@candidate")
-print(f"Loaded model: {UC_MODEL_NAME}@candidate")
+# Set env vars so the agent code picks up the right config
+try:
+    os.environ["LLM_ENDPOINT"] = dbutils.widgets.get("llm_endpoint")
+except Exception:
+    os.environ.setdefault("LLM_ENDPOINT", "databricks-claude-sonnet-4-5")
+os.environ["VECTOR_SEARCH_INDEX"] = VS_INDEX
+os.environ.setdefault("PROMPT_NAME", f"{CATALOG}.{SCHEMA}.rag_prompt")
+os.environ.setdefault("PROMPT_ALIAS", "production")
 
+# Add the bundle root to sys.path so we can import agent_server
+notebook_path = (
+    dbutils.notebook.entry_point.getDbutils()
+    .notebook().getContext().notebookPath().get()
+)
+bundle_root = os.path.dirname(os.path.dirname(notebook_path))
+if not bundle_root.startswith("/Workspace"):
+    bundle_root = f"/Workspace{bundle_root}"
+if bundle_root not in sys.path:
+    sys.path.insert(0, bundle_root)
+
+from agent_server.agent import _retrieve_context, _load_and_format_prompt, _get_openai_client, LLM_ENDPOINT_NAME
+
+print(f"Agent imported directly from agent_server.agent")
+print(f"  LLM endpoint: {LLM_ENDPOINT_NAME}")
+print(f"  VS index: {VS_INDEX}")
+
+# COMMAND ----------
 
 def predict_fn(question: str) -> str:
     """
-    Wraps the real agent for mlflow.genai.evaluate().
+    Calls the same retrieval and LLM pipeline as the deployed agent.
 
-    Calls the actual rag_agent.py code via the logged model — same retrieval,
-    same prompt loading, same LLM call that runs in production. The parameter
-    name ('question') must match the key in eval_data['inputs'].
+    Runs _retrieve_context -> _load_and_format_prompt -> LLM call, matching
+    the exact code path in agent_server/agent.py.
     """
-    request = {"input": [{"role": "user", "content": question}]}
-    response = _loaded_model.predict(request)
+    context = _retrieve_context(question)
+    formatted_prompt = _load_and_format_prompt(context=context, question=question)
+    messages = [{"role": "user", "content": formatted_prompt}]
 
-    output = response.get("output", [])
-    if output and isinstance(output[0], dict):
-        return output[0].get("text", str(output[0]))
-    return str(output)
+    client = _get_openai_client()
+    response = client.chat.completions.create(
+        model=LLM_ENDPOINT_NAME,
+        messages=messages,
+        temperature=0.1,
+        max_tokens=1000,
+    )
+    return response.choices[0].message.content
 
 
-# Quick test - verify the loaded agent works before running full evaluation
 test_response = predict_fn("What is the remote work policy?")
 print(f"Test response: {test_response[:300]}...")
 
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## Step 3: Define Scorers
-# MAGIC
-# MAGIC Using MLflow's built-in scorers and custom judges.
 
 # COMMAND ----------
 
-import os
 from mlflow.genai.scorers import Correctness
 
-# Concurrency settings for mlflow.genai.evaluate()
-# Default is 10 workers each, but Foundation Model endpoints may throttle.
-# Adjust based on your endpoint's rate limits.
-os.environ["MLFLOW_GENAI_EVAL_MAX_WORKERS"] = "4"          # parallel test cases
-os.environ["MLFLOW_GENAI_EVAL_MAX_SCORER_WORKERS"] = "2"   # parallel scorers per test case
+os.environ["MLFLOW_GENAI_EVAL_MAX_WORKERS"] = "4"
+os.environ["MLFLOW_GENAI_EVAL_MAX_SCORER_WORKERS"] = "2"
 
-# Scorers for offline evaluation.
-# We use only Correctness here (the quality gate metric) to keep evaluation fast.
-# Additional quality checks (professional tone, source citation, safety,
-# groundedness) run automatically in production via the External Monitor (NB09).
 scorers = [
     Correctness(model=JUDGE_LLM),
 ]
 
 print(f"Configured {len(scorers)} scorer(s) (judge model: {JUDGE_LLM})")
-print(f"Concurrency: {os.environ['MLFLOW_GENAI_EVAL_MAX_WORKERS']} data workers, "
-      f"{os.environ['MLFLOW_GENAI_EVAL_MAX_SCORER_WORKERS']} scorer workers")
 
 # COMMAND ----------
 # MAGIC %md
 # MAGIC ## Step 4: Run Evaluation
-# MAGIC
-# MAGIC `mlflow.genai.evaluate()` orchestrates:
-# MAGIC - Running the predict function on each test case
-# MAGIC - Applying all scorers
-# MAGIC - Logging results to MLflow experiment
 
 # COMMAND ----------
 
@@ -279,26 +270,25 @@ for metric, value in eval_results.metrics.items():
 
 # COMMAND ----------
 
-# Display per-row results (MLflow 3.x: use search_traces instead of eval_table)
 results_df = mlflow.search_traces(run_id=eval_results.run_id)
-display(results_df) if "display" in dir() else print(results_df)
+if not results_df.empty:
+    safe_cols = [c for c in ["trace_id", "state", "execution_duration", "status", "execution_time_ms"] if c in results_df.columns]
+    print(results_df[safe_cols].to_string() if safe_cols else f"{len(results_df)} traces found")
+else:
+    print("No traces found")
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Step 6: Quality Gate Check
-# MAGIC
-# MAGIC Verify the agent meets minimum quality thresholds before promotion.
+# MAGIC ## Step 6: Quality Gate
 
 # COMMAND ----------
 
 metrics = eval_results.metrics
 
-# Check quality gates
 gate_results = {}
 all_passed = True
 
 for metric_name, threshold in QUALITY_THRESHOLDS.items():
-    # Find matching metric (metrics may have prefixes like 'correctness/mean')
     matching_metrics = {k: v for k, v in metrics.items() if metric_name in k.lower() and "mean" in k.lower()}
 
     if matching_metrics:
@@ -320,39 +310,21 @@ print(f"\nOverall Quality Gate: {'PASSED' if all_passed else 'FAILED'}")
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Step 7: Conditional Promotion
+# MAGIC ## Step 7: Record Results
 # MAGIC
-# MAGIC If quality gates pass, promote candidate to champion.
+# MAGIC In the Apps model, quality gates inform deployment decisions but don't
+# MAGIC drive model version promotion. The evaluation run ID is recorded for
+# MAGIC traceability — CI/CD uses this to gate the `bundle deploy` step.
 
 # COMMAND ----------
 
 if all_passed:
-    client = mlflow.MlflowClient()
-
-    # Get candidate version
-    candidate = client.get_model_version_by_alias(UC_MODEL_NAME, "candidate")
-    version = candidate.version
-
-    # Promote to champion
-    client.set_registered_model_alias(
-        name=UC_MODEL_NAME,
-        alias="champion",
-        version=version,
-    )
-
-    print(f"Model version {version} promoted to 'champion'!")
-    print(f"  {UC_MODEL_NAME}@champion -> version {version}")
-
-    # Set task value for deployment notebook
+    print(f"Quality gate PASSED — safe to deploy via `databricks bundle deploy`")
     if "dbutils" in dir():
-        dbutils.jobs.taskValues.set(key="promoted_version", value=version)
         dbutils.jobs.taskValues.set(key="quality_gate_passed", value=True)
+        dbutils.jobs.taskValues.set(key="eval_run_id", value=eval_results.run_id)
 else:
-    print("Quality gates FAILED - model NOT promoted.")
-    print("Review the evaluation results above and improve the agent.")
-
+    print("Quality gate FAILED — do NOT deploy.")
     if "dbutils" in dir():
         dbutils.jobs.taskValues.set(key="quality_gate_passed", value=False)
-
-    # Fail the notebook so the pipeline does not proceed to deployment
-    raise Exception("Quality gate check failed - model NOT promoted to champion")
+    raise Exception("Quality gate failed — agent does not meet minimum quality thresholds")

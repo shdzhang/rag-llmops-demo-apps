@@ -13,10 +13,6 @@ variables:
     description: "UC schema for this project"
     default: "corp_affairs"
 
-  model_name:
-    description: "Name of the registered model"
-    default: "corp_chatbot"
-
   app_name:
     description: "Name of the Databricks App"
     default: "corp-chatbot-app"
@@ -43,7 +39,7 @@ variables:
 
   experiment_name:
     description: "MLflow experiment name"
-    default: "/Users/${workspace.current_user.userName}/${bundle.target}_${var.model_name}"
+    default: "/Users/${workspace.current_user.userName}/${bundle.target}_corp_chatbot"
 
 resources:
   experiments:
@@ -54,6 +50,12 @@ resources:
     corporate_schema:
       name: ${var.schema_name}
       catalog_name: ${var.catalog_name}
+      grants:
+        - principal: "${resources.apps.corp_chatbot_app.service_principal_client_id}"
+          privileges:
+            - USE_SCHEMA
+            - SELECT
+            - EXECUTE
 
   # The Databricks App that serves the agent
   apps:
@@ -93,6 +95,7 @@ targets:
     mode: production
     workspace:
       host: https://adb-984752964297111.11.azuredatabricks.net
+      root_path: /Workspace/Users/shidong.zhang@databricks.com/.bundle/${bundle.name}/${bundle.target}
     resources:
       apps:
         corp_chatbot_app:

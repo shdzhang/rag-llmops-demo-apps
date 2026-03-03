@@ -58,25 +58,25 @@ def _get_openai_client():
 def _retrieve_context(question: str) -> str:
     """Retrieve relevant documents from Vector Search.
 
-    When deployed as a Databricks App, uses the app's service principal
-    credentials. For per-user access control, use get_user_workspace_client()
-    from agent_server.utils.
+    Uses the Databricks SDK WorkspaceClient which automatically picks up
+    the app's service principal credentials (DATABRICKS_CLIENT_ID /
+    DATABRICKS_CLIENT_SECRET / DATABRICKS_HOST) injected by Databricks Apps.
     """
-    from databricks.vector_search.client import VectorSearchClient
+    from databricks.sdk import WorkspaceClient
 
     try:
-        vsc = VectorSearchClient(disable_notice=True)
-        index = vsc.get_index(index_name=VECTOR_SEARCH_INDEX)
-        results = index.similarity_search(
+        w = WorkspaceClient()
+        results = w.vector_search_indexes.query_index(
+            index_name=VECTOR_SEARCH_INDEX,
             query_text=question,
             columns=["content", "source_file", "department"],
             num_results=5,
         )
-        docs = results.get("result", {}).get("data_array", [])
-        if not docs:
+        rows = results.result.data_array if results.result else []
+        if not rows:
             return "No relevant documents found."
         return "\n\n".join(
-            f"[Source: {row[1]} | Dept: {row[2]}]\n{row[0]}" for row in docs
+            f"[Source: {row[1]} | Dept: {row[2]}]\n{row[0]}" for row in rows
         )
     except Exception as e:
         return f"Error retrieving documents: {e}"
@@ -124,7 +124,13 @@ async def streaming(
     user_message = ""
     for msg in request.input:
         if msg.role == "user":
-            user_message = msg.content
+            if isinstance(msg.content, str):
+                user_message = msg.content
+            elif isinstance(msg.content, list):
+                user_message = " ".join(
+                    item.text if hasattr(item, "text") else str(item)
+                    for item in msg.content
+                )
 
     context = _retrieve_context(user_message)
     formatted_prompt = _load_and_format_prompt(context=context, question=user_message)
@@ -154,16 +160,14 @@ async def streaming(
                 delta=delta.content,
             )
 
-    from mlflow.types.responses import ResponsesAgentResponseOutputItemMessage
-
     yield ResponsesAgentStreamEvent(
         type="response.output_item.done",
-        item=ResponsesAgentResponseOutputItemMessage(
-            id=item_id,
-            type="message",
-            role="assistant",
-            content=[{"type": "output_text", "text": full_text}],
-        ),
+        item={
+            "id": item_id,
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": full_text}],
+        },
     )
 
 

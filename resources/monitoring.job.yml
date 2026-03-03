@@ -1,7 +1,7 @@
 resources:
   jobs:
     monitoring:
-      name: "Production Monitoring"
+      name: "Monitoring & Smoke Tests"
       queue:
         enabled: true
       parameters:
@@ -9,20 +9,33 @@ resources:
           default: "${var.catalog_name}"
         - name: "schema_name"
           default: "${resources.schemas.corporate_schema.name}"
-        - name: "model_name"
-          default: "${var.model_name}"
         - name: "experiment_name"
           default: "${resources.experiments.experiment.name}"
         - name: "app_name"
           default: "${var.app_name}"
+        - name: "llm_endpoint"
+          default: "${var.llm_endpoint}"
+        - name: "vector_search_endpoint"
+          default: "${var.vector_search_endpoint}"
       tasks:
-        - task_key: monitoring_dashboard
+        - task_key: smoke_tests
           notebook_task:
-            notebook_path: ../notebooks/09_monitoring_dashboard.py
+            notebook_path: ../notebooks/05_inference_testing.py
             base_parameters:
               catalog_name: "{{job.parameters.catalog_name}}"
               schema_name: "{{job.parameters.schema_name}}"
-              model_name: "{{job.parameters.model_name}}"
+              experiment_name: "{{job.parameters.experiment_name}}"
+              app_name: "{{job.parameters.app_name}}"
+              llm_endpoint: "{{job.parameters.llm_endpoint}}"
+              vector_search_endpoint: "{{job.parameters.vector_search_endpoint}}"
+        - task_key: monitoring_dashboard
+          depends_on:
+            - task_key: smoke_tests
+          notebook_task:
+            notebook_path: ../notebooks/06_monitoring_dashboard.py
+            base_parameters:
+              catalog_name: "{{job.parameters.catalog_name}}"
+              schema_name: "{{job.parameters.schema_name}}"
               experiment_name: "{{job.parameters.experiment_name}}"
               app_name: "{{job.parameters.app_name}}"
       schedule:

@@ -1,18 +1,25 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 08 - Inference Testing (Databricks App)
+# MAGIC # 05 - Inference Testing (Databricks App)
 # MAGIC
-# MAGIC Comprehensive testing of the deployed Databricks App:
-# MAGIC 1. Basic RAG queries
-# MAGIC 2. Edge cases (out-of-scope, ambiguous)
-# MAGIC 3. Latency benchmarking
-# MAGIC 4. Response quality validation
+# MAGIC Comprehensive smoke testing of the deployed Databricks App:
+# MAGIC 1. Verify app is running via SDK
+# MAGIC 2. Call the **same agent code** the app runs (retrieval → prompt → LLM)
+# MAGIC 3. Edge cases (out-of-scope, ambiguous)
+# MAGIC 4. Latency benchmarking
+# MAGIC
+# MAGIC ### Why direct function calls instead of HTTP?
+# MAGIC Databricks Apps with user authorization require browser-based OAuth.
+# MAGIC Programmatic HTTP calls from notebooks are redirected to a login page.
+# MAGIC We test the agent logic directly — the same code path the deployed app uses.
 
 # COMMAND ----------
-# MAGIC %pip install mlflow>=3.1 databricks-sdk
+# MAGIC %pip install mlflow>=3.1 databricks-sdk databricks-vectorsearch databricks-openai
 # MAGIC %restart_python
 
 # COMMAND ----------
+import os
+import sys
 import time
 import statistics
 import mlflow
@@ -21,9 +28,9 @@ from databricks.sdk import WorkspaceClient
 # --- Configuration (from DAB job parameters) ---
 CATALOG = dbutils.widgets.get("catalog_name")
 SCHEMA = dbutils.widgets.get("schema_name")
-MODEL_NAME = dbutils.widgets.get("model_name")
 EXPERIMENT_NAME = dbutils.widgets.get("experiment_name")
 APP_NAME = dbutils.widgets.get("app_name")
+VS_ENDPOINT = dbutils.widgets.get("vector_search_endpoint")
 
 mlflow.set_experiment(EXPERIMENT_NAME)
 
@@ -37,7 +44,7 @@ print(f"Testing app: {APP_NAME}")
 # COMMAND ----------
 
 print(f"Checking app '{APP_NAME}' readiness...")
-for _i in range(40):  # up to ~20 min
+for _i in range(40):
     try:
         app_info = w.apps.get(APP_NAME)
         app_status = str(app_info.app_status.state) if app_info.app_status else "UNKNOWN"
@@ -64,32 +71,55 @@ APP_URL = app_info.url.rstrip("/")
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC ## Helper: Query App Endpoint
+# MAGIC ## Step 1b: Import Agent Code
+# MAGIC The notebook calls the same functions the deployed app runs.
 
 # COMMAND ----------
 
-def query_agent(question: str, max_output_tokens: int = 500) -> dict:
-    """Query the Databricks App agent and return parsed result."""
-    payload = {
-        "input": [{"role": "user", "content": question}],
-        "max_output_tokens": max_output_tokens,
-    }
-    result = w.api_client.do(
-        "POST",
-        f"/apps/{APP_NAME}/invocations",
-        body=payload,
-    )
+VS_INDEX = f"{CATALOG}.{SCHEMA}.docs_index"
 
-    answer = ""
-    for item in result.get("output", []):
-        if item.get("type") == "message":
-            for content_block in item.get("content", []):
-                if content_block.get("type") == "output_text":
-                    answer += content_block.get("text", "")
-    return {"answer": answer, "raw": result}
+try:
+    os.environ["LLM_ENDPOINT"] = dbutils.widgets.get("llm_endpoint")
+except Exception:
+    os.environ.setdefault("LLM_ENDPOINT", "databricks-claude-sonnet-4-5")
+os.environ["VECTOR_SEARCH_INDEX"] = VS_INDEX
+os.environ.setdefault("PROMPT_NAME", f"{CATALOG}.{SCHEMA}.rag_prompt")
+os.environ.setdefault("PROMPT_ALIAS", "production")
+
+notebook_path = (
+    dbutils.notebook.entry_point.getDbutils()
+    .notebook().getContext().notebookPath().get()
+)
+bundle_root = os.path.dirname(os.path.dirname(notebook_path))
+if not bundle_root.startswith("/Workspace"):
+    bundle_root = f"/Workspace{bundle_root}"
+if bundle_root not in sys.path:
+    sys.path.insert(0, bundle_root)
+
+from agent_server.agent import _retrieve_context, _load_and_format_prompt, _get_openai_client, LLM_ENDPOINT_NAME
+
+print(f"Agent code imported from agent_server.agent")
+print(f"  LLM endpoint: {LLM_ENDPOINT_NAME}")
+print(f"  VS index:     {VS_INDEX}")
+
+def query_agent(question: str, max_output_tokens: int = 500) -> dict:
+    """Call the same retrieval → prompt → LLM pipeline as the deployed app."""
+    context = _retrieve_context(question)
+    formatted_prompt = _load_and_format_prompt(context=context, question=question)
+    messages = [{"role": "user", "content": formatted_prompt}]
+
+    client = _get_openai_client()
+    response = client.chat.completions.create(
+        model=LLM_ENDPOINT_NAME,
+        messages=messages,
+        temperature=0.1,
+        max_tokens=max_output_tokens,
+    )
+    answer = response.choices[0].message.content
+    return {"answer": answer}
 
 # Quick test
-print("Running a quick test query...")
+print("\nRunning a quick test query...")
 test = query_agent("Hello, what can you help me with?")
 print(f"Response: {test['answer'][:200]}")
 

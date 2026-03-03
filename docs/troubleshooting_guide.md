@@ -1,6 +1,6 @@
-# Troubleshooting Guide: RAG LLMOps Demo
+# Troubleshooting Guide: RAG LLMOps Demo (Databricks Apps)
 
-Issues encountered during development and deployment, organized by category. Each entry includes the error, root cause, and fix.
+Issues encountered during development and deployment. Each entry includes the error, root cause, and fix.
 
 ---
 
@@ -9,10 +9,13 @@ Issues encountered during development and deployment, organized by category. Eac
 1. [Configuration & Naming](#1-configuration--naming)
 2. [Vector Search & Retrieval](#2-vector-search--retrieval)
 3. [Agent Evaluation](#3-agent-evaluation)
-4. [Model Serving & Deployment](#4-model-serving--deployment)
-5. [MLflow 3.x Migration](#5-mlflow-3x-migration)
-6. [Databricks Asset Bundles](#6-databricks-asset-bundles)
-7. [Quick Reference](#7-quick-reference)
+4. [MLflow 3.x](#4-mlflow-3x)
+5. [Databricks Asset Bundles](#5-databricks-asset-bundles)
+6. [Databricks Apps Deployment](#6-databricks-apps-deployment)
+7. [Databricks Apps Runtime](#7-databricks-apps-runtime)
+8. [Notebook Smoke Tests (NB04)](#8-notebook-smoke-tests-nb05)
+9. [Quick Reference](#9-quick-reference)
+10. [Historical: Model Serving Issues](#10-historical-model-serving-issues)
 
 ---
 
@@ -25,50 +28,24 @@ Issues encountered during development and deployment, organized by category. Eac
 Unity Catalog entity main.corporate_affairs.corporate_docs_index does not exist.
 ```
 
-**Cause:** Catalog, schema, and resource names were hardcoded in both `rag_agent.py` and notebooks (01-09). When DAB `mode: development` prepends `dev_<username>_` to schemas, the hardcoded names no longer match.
+**Cause:** Catalog, schema, and resource names were hardcoded. When DAB `mode: development` prepends `dev_<username>_` to schemas, hardcoded names don't match.
 
 **Fix:**
-- **Agent:** Reads config dynamically via `mlflow.models.ModelConfig()`, passed from notebook 04's `log_model(model_config=...)`.
-- **Notebooks:** All read from DAB job parameters via `dbutils.widgets.get("catalog_name")`, etc.
+- **Agent:** Reads config from environment variables (`LLM_ENDPOINT`, `VECTOR_SEARCH_INDEX`, etc.), set in `app.yaml` and `.env`.
+- **Notebooks:** Read from DAB job parameters via `dbutils.widgets.get("catalog_name")`, etc.
 
 ---
 
 ### 1.2 Resource Name Length Limits (63/64 chars)
 
-**Errors:**
-```
-Tool name shidong_catalog__dev_shidong_zhang_corporate_affairs__corporate_docs_index is too long, truncating to 64 characters
-```
-Endpoint wait loops ran forever because the constructed name didn't match the actual (truncated) endpoint name.
-
-**Cause:** Two separate limits collide with DAB `mode: development` prefixing:
-- Vector Search tool names: **64-character** limit
-- Model Serving endpoint names: **63-character** limit (truncated by `agents.deploy()`)
-
-**Fix:**
-1. Shortened all base resource names (`corporate_affairs` → `corp_affairs`, `corporate_docs_index` → `docs_index`, etc.)
-2. Added `[:63]` truncation when constructing endpoint names:
-```python
-endpoint_name = f"agents_{UC_MODEL_NAME}".replace(".", "-")[:63]
-```
-
----
-
-### 1.3 UC Model Aliases and Tags Are Dicts, Not Lists
-
 **Error:**
 ```
-'str' object has no attribute 'alias'
+Tool name shidong_catalog__dev_shidong_zhang_corporate_affairs__corporate_docs_index is too long
 ```
 
-**Cause:** Unity Catalog returns `model.aliases` as `{"alias_name": "version"}` and `v.tags` as `{"key": "value"}` -- both dicts, not lists of objects.
+**Cause:** Vector Search tool names have a 64-character limit. Long catalog/schema/index names combined with DAB prefixing exceed this.
 
-**Fix:**
-```python
-aliases = model.aliases or {}
-for alias_name, version in aliases.items():
-    print(f"  @{alias_name} -> version {version}")
-```
+**Fix:** Use short base names (`corp_affairs` instead of `corporate_affairs`, `docs_index` instead of `corporate_docs_index`).
 
 ---
 
@@ -81,34 +58,8 @@ for alias_name, version in aliases.items():
 **Root Cause:** Change Data Feed (CDF) was enabled **after** the initial data write. The Delta Sync pipeline had no changes to pick up.
 
 **Fix:**
-- **Notebook 01:** Enable CDF *before* writing data via `CREATE TABLE IF NOT EXISTS ... TBLPROPERTIES (delta.enableChangeDataFeed = true)`. Table properties persist across data overwrites, so a single `CREATE TABLE` is sufficient.
-- **Notebook 02:** Wait loop now checks for *actual data* (via `similarity_search`), not just `ONLINE` status. Auto-triggers a sync if index is empty.
-
----
-
-### 2.2 VectorSearchClient OBO Authentication
-
-**Error:**
-```
-VectorSearchClient.__init__() got an unexpected keyword argument 'workspace_client'
-```
-
-**Cause:** `VectorSearchClient` does not accept a `workspace_client` parameter. The correct OBO mechanism is `CredentialStrategy`.
-
-**Fix:**
-```python
-from databricks.vector_search.client import VectorSearchClient, CredentialStrategy
-
-try:
-    # OBO: authenticate as calling user in Model Serving
-    vsc = VectorSearchClient(
-        credential_strategy=CredentialStrategy.MODEL_SERVING_USER_CREDENTIALS,
-        disable_notice=True,
-    )
-except Exception:
-    # Fallback for local dev / notebook
-    vsc = VectorSearchClient(disable_notice=True)
-```
+- **Notebook 01:** Enable CDF *before* writing data via `CREATE TABLE IF NOT EXISTS ... TBLPROPERTIES (delta.enableChangeDataFeed = true)`.
+- **Notebook 02 / NB04:** Wait loop checks for *actual data* (via `similarity_search`), not just `ONLINE` status. Auto-triggers sync if index is empty.
 
 ---
 
@@ -116,17 +67,17 @@ except Exception:
 
 ### 3.1 All Notebooks Must Share One MLflow Experiment
 
-**Symptom:** MLflow UI showed stray experiments (e.g., `07_endpoint_deployment`) instead of one unified experiment.
+**Symptom:** MLflow UI showed stray experiments created by individual notebooks.
 
-**Cause:** Notebooks without `mlflow.set_experiment()` get an auto-created experiment named after the notebook path.
+**Cause:** Notebooks without `mlflow.set_experiment()` get auto-created experiments.
 
-**Fix:** Added `experiment_name` as a DAB job parameter to all job YAMLs. Every notebook (04-09) now calls:
+**Fix:** Added `experiment_name` as a DAB job parameter. Every notebook calls:
 ```python
 EXPERIMENT_NAME = dbutils.widgets.get("experiment_name")
 mlflow.set_experiment(EXPERIMENT_NAME)
 ```
 
-> **Note:** Job YAMLs must reference `${resources.experiments.experiment.name}` (not `${var.experiment_name}`) so the DAB prefix is included. See also [6.3 Monitoring Job Creates a Stray Experiment](#63-monitoring-job-creates-a-stray-mlflow-experiment).
+> Job YAMLs must reference `${resources.experiments.experiment.name}` (not `${var.experiment_name}`) so the DAB prefix is included.
 
 ---
 
@@ -135,13 +86,13 @@ mlflow.set_experiment(EXPERIMENT_NAME)
 **Symptom:** All evaluation questions scored 0 for correctness. Agent responses said "I'm unable to access..."
 
 **Causes (cumulative):**
-1. Vector Search index had no data (CDF ordering issue -- see 2.1)
-2. `predict_fn` silently passed error strings as context instead of failing
+1. Vector Search index had no data (CDF ordering issue — see 2.1)
+2. Agent couldn't authenticate to Vector Search (see 7.2)
 3. `expected_response` values were overly detailed, penalizing partial matches
 
 **Fixes:**
-1. Fixed CDF ordering (see 2.1) + added pre-evaluation readiness check with auto-sync
-2. `predict_fn` now raises `RuntimeError` on 0 retrieval results
+1. Fixed CDF ordering + added pre-evaluation readiness check with auto-sync
+2. Used `WorkspaceClient` for VS retrieval (handles Apps OAuth M2M natively)
 3. Simplified `expected_response` to essential facts only
 
 ---
@@ -150,108 +101,86 @@ mlflow.set_experiment(EXPERIMENT_NAME)
 
 **Symptom:** `mlflow.genai.evaluate()` ran for 10+ hours before being cancelled.
 
-**Cause:** 3 scorers x 12 test cases = 36 judge calls (+ 12 predict calls) hitting a rate-limited Claude Sonnet 4.5 endpoint, each sending large prompts.
+**Cause:** 3 scorers x 12 test cases = 36 judge calls hitting a rate-limited endpoint, each sending large prompts.
 
 **Fix:**
-1. **1 scorer** (`Correctness` only) -- additional quality checks run in production via External Monitor (NB09)
+1. **1 scorer** (`Correctness` only) — additional quality checks run in production via External Monitor (NB06)
 2. **Claude Opus 4.1** as judge (`databricks:/databricks-claude-opus-4-1`)
 3. **8 test cases** (down from 12)
 4. Concurrency env vars: `MLFLOW_GENAI_EVAL_MAX_WORKERS=4`, `MLFLOW_GENAI_EVAL_MAX_SCORER_WORKERS=2`
 
-Result: **~10-15 minutes** instead of 10+ hours.
+Result: ~10-15 minutes instead of 10+ hours.
 
 ---
 
-### 3.4 No Champion Model for Deployment
+### 3.4 `AttributeError: 'str' object has no attribute 'name'` in NB04
 
 **Error:**
 ```
-Registered Model Alias 'champion' does not exist.
+AttributeError: 'str' object has no attribute 'name'
 ```
 
-**Cause:** Quality gate in notebook 05 failed but the `raise Exception` was commented out, so the pipeline continued to deployment without a promoted model.
+**Cause:** NB04 used `[w.name for w in dbutils.widgets.getAll()]` to list available widgets. In some Databricks Runtime versions, `dbutils.widgets.getAll()` returns plain strings, not objects with a `.name` attribute.
 
-**Fix:** Uncommented the `raise Exception` so the pipeline stops on quality failure. Notebook 07 also has a fallback to `@candidate` alias.
-
----
-
-## 4. Model Serving & Deployment
-
-### 4.1 `agents.deploy()` ValueError Handling
-
-**Errors:**
-```
-ValueError: Endpoint ... already serves model ...
-ValueError: Endpoint ... is currently updating.
-```
-
-**Cause:** `agents.deploy()` raises `ValueError` when (a) the same version is already deployed, or (b) the endpoint is mid-update.
-
-**Fix:**
-- **Pre-deployment:** Wait loop checks `config_update` status, waits up to 20 min for any prior update to finish
-- **Try-except:** Catches `"already serves"` and `"currently updating"` as non-fatal
-
----
-
-### 4.2 Endpoint Readiness Check Loops Forever
-
-**Symptom:** Endpoint was READY, but the wait loop never broke out (ran 960+ seconds).
-
-**Cause:** `str(state.config_update)` returns `"EndpointStateConfigUpdate.NOT_UPDATING"`, but the code used exact string matching (`== "NOT_UPDATING"`).
-
-**Fix:** Use substring checks:
+**Fix:** Simplified environment variable setting with a direct `try/except`:
 ```python
-is_ready = "READY" in str(state.ready)
-is_updating = "IN_PROGRESS" in str(state.config_update)
+try:
+    os.environ["LLM_ENDPOINT"] = dbutils.widgets.get("llm_endpoint")
+except Exception:
+    os.environ.setdefault("LLM_ENDPOINT", "databricks-claude-sonnet-4-5")
 ```
 
 ---
 
-### 4.3 ResponsesAgent Requires Responses API Format
+### 3.5 `PySpark ValueError` When Displaying `mlflow.search_traces()` Results
 
 **Error:**
 ```
-Model is missing inputs ['input']. Note that there were extra inputs: ['messages', 'max_tokens'].
+PySpark ValueError: Exception thrown when converting pandas.Series (object)
+with name 'response' to Arrow Array
 ```
 
-**Cause:** `ResponsesAgent` uses the Responses API (`input`/`output`), not Chat Completions (`messages`/`choices`).
+**Cause:** `mlflow.search_traces()` returns a pandas DataFrame with complex Python objects (nested dicts/lists) in columns like `response`. Databricks `display()` converts pandas DataFrames via PySpark using Apache Arrow, which cannot serialize these complex objects.
 
-**Fix:** All endpoint queries use:
+**Fix:** Print only safe scalar columns instead of using `display()`:
 ```python
-# Request
-body = {"input": [{"role": "user", "content": question}]}
-
-# Response parsing
-for item in result.get("output", []):
-    if item.get("type") == "message":
-        for block in item.get("content", []):
-            if block.get("type") == "output_text":
-                answer += block.get("text", "")
+results_df = mlflow.search_traces(run_id=eval_results.run_id)
+safe_cols = [c for c in ["trace_id", "status", "execution_time_ms"] if c in results_df.columns]
+print(results_df[safe_cols].to_string() if safe_cols else f"{len(results_df)} traces found")
 ```
 
-Also use `w.api_client.do()` instead of raw `requests.post()` to handle all auth methods (PAT, AAD, OAuth) transparently.
+**Applies to:** Any notebook that calls `display()` on `mlflow.search_traces()` output (NB04, NB06).
 
 ---
 
-### 4.4 Inference Table JSON Path Mismatch
+### 3.6 `mlflow.search_traces()` Column Names Don't Match Documentation
 
-**Symptom:** Monitoring "Popular Questions" query returned `NULL` for all questions.
+**Symptom:** NB06 analytics sections (volume, latency, errors) all print "No column found" — the code runs without errors but produces no useful output.
 
-**Cause:** SQL used `$.messages[0].content` (Chat Completions) but Responses API stores input as `$.input[0].content`.
+**Cause:** `mlflow.search_traces()` returns columns with different names than commonly documented:
 
-**Fix:**
-```sql
-COALESCE(
-    get_json_object(request, '$.input[0].content'),
-    get_json_object(request, '$.messages[0].content')
-) AS question
+| Expected | Actual |
+|---|---|
+| `status` | `state` |
+| `execution_time_ms` | `execution_duration` |
+| `timestamp_ms` | `request_time` |
+
+The full column list: `trace_id`, `trace`, `client_request_id`, `state`, `request_time`, `execution_duration`, `request`, `response`, `trace_metadata`, `tags`, `spans`, `assessments`.
+
+**Fix:** Use the actual column names with fallbacks:
+```python
+_state_col = "state" if "state" in df.columns else "status"
+_latency_col = "execution_duration" if "execution_duration" in df.columns else "execution_time_ms"
+_time_col = "request_time" if "request_time" in df.columns else "timestamp_ms"
 ```
+
+**Note:** `execution_duration` may be a `timedelta64` type requiring conversion: `pd.to_timedelta(series).dt.total_seconds() * 1000` for milliseconds.
 
 ---
 
-## 5. MLflow 3.x Migration
+## 4. MLflow 3.x
 
-### 5.1 Prompt Registry Requires 3-Level UC Names
+### 4.1 Prompt Registry Requires 3-Level UC Names
 
 **Error:**
 ```
@@ -262,7 +191,7 @@ RestException: INVALID_PARAMETER_VALUE: name is not a valid name.
 
 ---
 
-### 5.2 `EvaluationResult.eval_table` Removed
+### 4.2 `EvaluationResult.eval_table` Removed
 
 **Error:**
 ```
@@ -273,7 +202,7 @@ RestException: INVALID_PARAMETER_VALUE: name is not a valid name.
 
 ---
 
-### 5.3 LLM Judge Model URI Format
+### 4.3 LLM Judge Model URI Format
 
 **Error:**
 ```
@@ -284,49 +213,39 @@ Malformed model uri 'databricks-claude-opus-4-1'
 
 ---
 
-### 5.4 Link Prompts to MLflow Runs
-
-**Symptom:** "Prompts" section in experiment UI was empty.
-
-**Fix:** Add `prompts=[prompt_uri]` to `mlflow.pyfunc.log_model()`.
-
----
-
-### 5.5 `get_open_ai_client()` Deprecated
+### 4.4 `get_open_ai_client()` Deprecated
 
 **Fix:** Replace with:
 ```python
 from databricks_openai import DatabricksOpenAI
 client = DatabricksOpenAI()
 ```
-Add `databricks-openai` to `%pip install` commands.
 
 ---
 
-### 5.6 `mlflow.openai.autolog()` Fails During `log_model()` Validation
+### 4.5 `mlflow.openai.autolog()` Crashes on Module Import
 
 **Error:**
 ```
-MlflowException: Failed to run user code from .../rag_agent.py.
-Error: 'NoneType' object has no attribute '_multi_processor'
+AttributeError: 'NoneType' object has no attribute '_multi_processor'
 ```
 
-**Cause:** `mlflow.pyfunc.log_model()` loads the agent module in a validation subprocess where the OpenTelemetry `GLOBAL_TRACE_PROVIDER` is not initialized. `mlflow.openai.autolog()` tries to access `GLOBAL_TRACE_PROVIDER._multi_processor` and crashes. This started appearing after MLflow/openai SDK version updates — earlier versions tolerated missing providers.
+**Cause:** When the agent module is imported outside the AgentServer (e.g., during local testing or NB04 evaluation), the OpenTelemetry `GLOBAL_TRACE_PROVIDER` is `None`. `mlflow.openai.autolog()` tries to access `GLOBAL_TRACE_PROVIDER._multi_processor`.
 
-**Fix:** Wrap `autolog()` in a try/except in the agent module:
+**Fix:** Wrap in try/except:
 ```python
 try:
     mlflow.openai.autolog()
 except Exception:
     pass
 ```
-The agent works correctly without autolog. Explicit `@mlflow.trace` decorators on agent methods still produce traces. Also use lazy initialization for the `DatabricksOpenAI` client (property getter instead of `__init__`).
+Autolog works correctly when running inside the AgentServer.
 
 ---
 
-## 6. Databricks Asset Bundles
+## 5. Databricks Asset Bundles
 
-### 6.1 Double Prefix in Job Names
+### 5.1 Double Prefix in Job Names
 
 **Symptom:** Job names like `[dev shidong_zhang] [dev] Data Preparation`.
 
@@ -336,94 +255,457 @@ The agent works correctly without autolog. Explicit `@mlflow.trace` decorators o
 
 ---
 
-### 6.2 Notebook Not Deployed (Silent Skip)
+### 5.2 Notebook Not Deployed (Silent Skip)
 
 **Error:**
 ```
-Unable to access the notebook ".../05_agent_evaluation" in the workspace.
+Unable to access the notebook ".../04_agent_evaluation" in the workspace.
 ```
 
-**Cause:** Known DABs sync issue -- files silently skipped during upload.
+**Cause:** Known DABs sync issue — files silently skipped during upload.
 
 **Fix:** Redeploy. If persistent, manually upload the notebook.
 
 ---
 
-### 6.3 Monitoring Job Creates a Stray MLflow Experiment
+### 5.3 Monitoring Job Creates a Stray MLflow Experiment
 
-**Symptom:** Two experiments in the MLflow UI: `[dev shidong_zhang] dev_corp_chatbot` (correct) and `dev_corp_chatbot` (stray, created by the monitoring job).
+**Symptom:** Two experiments in the MLflow UI: one with the `[dev ...]` prefix (correct) and one without (stray).
 
-**Cause:** `monitoring.job.yml` used `${var.experiment_name}` for its `experiment_name` parameter. In `mode: development`, DAB prefixes **resource** names (e.g., `${resources.experiments.experiment.name}` → `[dev shidong_zhang] dev_corp_chatbot`) but does **not** prefix raw **variable** values (e.g., `${var.experiment_name}` → `dev_corp_chatbot`). When NB09 called `mlflow.set_experiment("dev_corp_chatbot")`, MLflow created a new experiment without the prefix.
+**Cause:** `monitoring.job.yml` used `${var.experiment_name}` for its parameter default. In `mode: development`, DAB prefixes **resource** names but does **not** prefix raw **variable** values. When NB06 called `mlflow.set_experiment("dev_corp_chatbot")`, MLflow created a new experiment without the prefix.
 
-**Fix:** Changed the default in `monitoring.job.yml` from `${var.experiment_name}` to `${resources.experiments.experiment.name}`, matching the other job YAMLs:
+**Fix:** Changed the default from `${var.experiment_name}` to `${resources.experiments.experiment.name}`:
 ```yaml
-# monitoring.job.yml
 parameters:
   - name: "experiment_name"
     default: "${resources.experiments.experiment.name}"  # NOT ${var.experiment_name}
 ```
 
-**Cleanup:** Delete the stray `dev_corp_chatbot` experiment from the MLflow UI.
-
 ---
 
-### 6.4 Prompt Registration Fails: `SCHEMA_DOES_NOT_EXIST`
+### 5.4 Prompt Registration Fails: `SCHEMA_DOES_NOT_EXIST`
 
 **Error:**
 ```
 RestException: SCHEMA_DOES_NOT_EXIST: Schema 'shidong_catalog.corp_affairs' does not exist.
 ```
 
-**Cause:** Same class of bug as 6.3. The `prompt_name` DAB variable was computed in `databricks.yml` using `${var.schema_name}` (raw value: `corp_affairs`). In `mode: development`, the actual schema is prefixed by DAB (e.g., `dev_shidong_zhang_corp_affairs`), but DAB variables can only reference other variables — not resources. So the prompt name pointed to a non-existent schema.
+**Cause:** The prompt name was constructed using `${var.schema_name}` (raw value). In `mode: development`, the actual schema is `dev_<username>_corp_affairs`, but DAB variables can't reference resources.
 
-**Key insight:** DAB variables (`${var.X}`) can only interpolate other variables. They **cannot** reference resources (`${resources.schemas.X.name}`). The dev-prefixed schema name is only available via resource references in job parameter defaults.
-
-**Fix:** Removed the computed `prompt_name` variable from `databricks.yml`. Instead:
-1. `databricks.yml` defines `prompt_base_name` (just `"rag_prompt"`)
-2. Job YAML passes it as `prompt_base_name` parameter
-3. Notebooks construct the full name using their (correctly-prefixed) widget values:
+**Fix:** Pass `prompt_base_name` (just `"rag_prompt"`) as a job parameter. Notebooks construct the full name:
 ```python
 PROMPT_NAME = f"{CATALOG}.{SCHEMA}.{dbutils.widgets.get('prompt_base_name')}"
 ```
 
-**Rule of thumb:** Never construct 3-level UC names (`catalog.schema.object`) in `databricks.yml` variables. Always construct them in notebooks using `CATALOG` and `SCHEMA` from job parameters, which carry the correct DAB-prefixed values.
+**Rule:** Never construct 3-level UC names in `databricks.yml` variables. Always construct them in notebooks using `CATALOG` and `SCHEMA` from job parameters.
 
 ---
 
-## 7. Quick Reference
+## 6. Databricks Apps Deployment
 
-### Querying a ResponsesAgent Endpoint
+### 6.1 Production Target Requires `root_path`
+
+**Error:**
+```
+Error: target with 'mode: production' must set 'workspace.root_path'
+```
+
+**Fix:** Add `root_path` to the prod target in `databricks.yml`:
+```yaml
+targets:
+  prod:
+    mode: production
+    workspace:
+      host: https://...
+      root_path: /Workspace/Users/<user>/.bundle/${bundle.name}/${bundle.target}
+```
+
+---
+
+### 6.2 App Deploy Fails: Vector Search Index Does Not Exist
+
+**Error:**
+```
+Failed to retrieve UC table info for resource 'vector-search-index'
+(shidong_catalog.corp_affairs.docs_index): TABLE_DOES_NOT_EXIST
+```
+
+**Cause:** The `databricks.yml` declares a `uc_securable` for the VS index, granting the app's service principal SELECT access. But the index doesn't exist yet because the data preparation job hasn't run.
+
+**Fix:** Deploy in stages (see [deployment_guide.md](deployment_guide.md)):
+1. Comment out the `vector-search-index` resource
+2. Deploy the bundle
+3. Run the data preparation job
+4. Uncomment the resource and redeploy
+
+---
+
+### 6.3 Duplicate MLflow Experiments (quickstart vs bundle)
+
+**Symptom:** Two experiments: `agents-on-apps` (from `uv run quickstart`) and `prod_corp_chatbot` (from `databricks bundle deploy`).
+
+**Fix:** Update `.env` to use the bundle-managed experiment ID. Delete the unused experiment.
+
+**Prevention:** Run `uv run quickstart` *after* `databricks bundle deploy`, or manually set `MLFLOW_EXPERIMENT_ID` in `.env`.
+
+---
+
+### 6.4 `requirements.txt` Must Contain `uv` (Not Dependencies)
+
+**Cause:** Databricks Apps uses `pip install -r requirements.txt` to bootstrap the runtime. If it lists actual dependencies, they conflict with `uv`'s resolution from `pyproject.toml`.
+
+**Fix:** `requirements.txt` must contain exactly one line: `uv`. All actual dependencies go in `pyproject.toml`.
+
+---
+
+### 6.5 `app.yaml` Must Be at Project Root
+
+**Cause:** `app.yaml` is the Apps runtime configuration file, read from the root of `source_code_path`. It is not a DAB resource definition.
+
+**Rule:** `app.yaml` = "how to run this app" (project root). `resources/*.yml` = "what infrastructure to create" (DAB includes).
+
+---
+
+### 6.6 `hatchling` Build Fails: "Unable to determine which files to ship"
+
+**Error:**
+```
+ValueError: Unable to determine which files to ship inside the wheel using the following heuristics
+```
+
+**Cause:** Project name (`rag-llmops-demo-apps`) doesn't match any directory. Hatchling expects a matching package directory.
+
+**Fix:** Add explicit package targets to `pyproject.toml`:
+```toml
+[tool.hatch.build.targets.wheel]
+packages = ["agent_server", "scripts"]
+```
+
+---
+
+### 6.7 OAuth Integration Quota Exceeded
+
+**Error:**
+```
+QUOTA_EXCEEDED: Only 1000 OAuth custom application integrations can be created per account
+```
+
+**Cause:** Every Databricks App creates an OAuth integration. Shared/demo workspaces accumulate abandoned apps.
+
+**Fix:**
+1. Delete unused apps: `databricks apps delete <old-app-name>`
+2. If broken app was partially created, delete it first, then redeploy
+3. Long-term: workspace admin cleans up stale integrations
+
+---
+
+## 7. Databricks Apps Runtime
+
+### 7.1 `ResponsesAgentResponseOutputItemMessage` ImportError
+
+**Error:**
+```
+ImportError: cannot import name 'ResponsesAgentResponseOutputItemMessage' from 'mlflow.types.responses'
+```
+
+**Cause:** This class doesn't exist in the installed MLflow version.
+
+**Fix:** Use a plain dict for the `item` field:
+```python
+yield ResponsesAgentStreamEvent(
+    type="response.output_item.done",
+    item={
+        "id": item_id,
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": full_text}],
+    },
+)
+```
+
+---
+
+### 7.2 VectorSearchClient Auth Fails in Apps (OAuth M2M)
+
+**Error:**
+```
+TypeError: Object of type ResponseInputTextParam is not JSON serializable
+```
+(Secondary symptom. Primary failure was `VectorSearchClient()` couldn't authenticate.)
+
+**Cause:** Apps inject OAuth M2M credentials (`DATABRICKS_CLIENT_ID/SECRET/HOST`). `VectorSearchClient()` looks for a PAT or notebook token — neither exists in Apps.
+
+**Fix:** Use `WorkspaceClient` instead (natively supports OAuth M2M):
 ```python
 from databricks.sdk import WorkspaceClient
 w = WorkspaceClient()
-result = w.api_client.do(
-    "POST",
-    f"/serving-endpoints/{endpoint_name}/invocations",
-    body={"input": [{"role": "user", "content": "your question"}]},
+results = w.vector_search_indexes.query_index(
+    index_name=INDEX_NAME,
+    query_text=question,
+    columns=[...],
+    num_results=5,
 )
-for item in result.get("output", []):
-    if item.get("type") == "message":
-        for block in item.get("content", []):
-            if block.get("type") == "output_text":
-                print(block["text"])
+rows = results.result.data_array if results.result else []
 ```
 
-### Endpoint Readiness Check (Enum-Safe)
-```python
-is_ready = "READY" in str(state.ready)
-is_updating = "IN_PROGRESS" in str(state.config_update)
+**Key insight:** In Apps, always prefer `WorkspaceClient()` over service-specific clients because it automatically handles OAuth M2M.
+
+---
+
+### 7.3 User Message Content Is a List, Not a String
+
+**Error:**
+```
+TypeError: Object of type ResponseInputTextParam is not JSON serializable
 ```
 
-### Endpoint Name (63-char Limit)
+**Cause:** In the Responses API, `msg.content` can be a `str` or `list[ResponseInputTextParam]`. The chat UI sends structured content. The agent assumed it was always a string.
+
+**Fix:** Handle both:
 ```python
-endpoint_name = f"agents_{UC_MODEL_NAME}".replace(".", "-")[:63]
+for msg in request.input:
+    if msg.role == "user":
+        if isinstance(msg.content, str):
+            user_message = msg.content
+        elif isinstance(msg.content, list):
+            user_message = " ".join(
+                item.text if hasattr(item, "text") else str(item)
+                for item in msg.content
+            )
 ```
 
-### Vector Search OBO
+---
+
+### 7.4 Prompt Creation Fails: `RestException: NOT_FOUND` in NB03
+
+**Error:**
+```
+RestException: NOT_FOUND: Prompt with name rag_prompt does not exist.
+```
+
+**Cause:** NB03 (`03_prompt_engineering.py`) calls `mlflow.genai.load_prompt()` to check if the prompt exists. When it doesn't, the exception handler matched only `RESOURCE_DOES_NOT_EXIST` but the actual error string was `NOT_FOUND`, causing the exception to re-raise instead of proceeding to create the prompt.
+
+**Fix:** Broaden the exception handler to catch multiple error phrases:
 ```python
-from databricks.vector_search.client import VectorSearchClient, CredentialStrategy
-vsc = VectorSearchClient(
-    credential_strategy=CredentialStrategy.MODEL_SERVING_USER_CREDENTIALS,
-    disable_notice=True,
+except Exception as e:
+    err_str = str(e)
+    if any(k in err_str for k in ("RESOURCE_DOES_NOT_EXIST", "NOT_FOUND", "does not exist")):
+        print(f"Prompt not found — creating initial versions ({type(e).__name__})")
+    else:
+        raise
+```
+
+---
+
+### 7.5 Prompt Loading Fails: Service Principal Lacks Schema Permissions
+
+**Error:**
+```
+PERMISSION_DENIED: Permission denied to create prompt in schema corp_affairs.
+```
+
+**Cause:** `mlflow.genai.load_prompt()` requires schema permissions. The app's service principal only had SELECT on the VS index.
+
+**Fix:** Add schema grants in `databricks.yml`:
+```yaml
+resources:
+  schemas:
+    corporate_schema:
+      grants:
+        - principal: "${resources.apps.corp_chatbot_app.service_principal_client_id}"
+          privileges:
+            - USE_SCHEMA
+            - SELECT
+            - EXECUTE
+```
+
+---
+
+## 8. Notebook Smoke Tests (NB05/NB06)
+
+### 8.1 `NotFound` When Querying App via `w.api_client.do()`
+
+**Error:**
+```
+NotFound: Not Found
+```
+
+**Cause:** NB05 originally called `w.api_client.do("POST", f"/apps/{APP_NAME}/invocations", body=payload)`. The Databricks SDK sends this to `https://<workspace>/apps/<name>/invocations`, but the workspace API does not have a REST endpoint at that path — the `/apps/<name>/` path is a web proxy, not a REST API route.
+
+**Fix:** See 8.3 for the final solution.
+
+---
+
+### 8.2 `JSONDecodeError` — App Returns Login Page, Not JSON
+
+**Error:**
+```
+JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+```
+
+**Cause:** After switching to direct HTTP calls (`requests.post(f"{APP_URL}/invocations", ...)`), the app responded with HTTP 200 but the body was the Databricks **Sign In HTML page** (25KB of HTML). The `Content-Type` was `text/html`, not `application/json`.
+
+**Debug evidence:**
+```
+status=200 content_type=text/html; charset=utf-8 body_len=25658
+url=https://adb-xxx.azuredatabricks.net/login.html?...redirect_uri=...corp-chatbot-app.../.auth/callback
+```
+
+**Root cause:** Databricks Apps with **user authorization** require browser-based OAuth. Neither the notebook's workspace API token (`dbutils.notebook.entry_point...apiToken().get()`) nor the workspace proxy (`<workspace-url>/apps/<name>/`) accepts Bearer tokens. Both redirect to the OAuth login flow.
+
+**Fix:** See 8.3.
+
+---
+
+### 8.3 Apps Cannot Be Queried Programmatically from Notebooks (OAuth)
+
+**Problem:** When user authorization is enabled, Databricks Apps require browser-based OAuth for all requests — including `/invocations`. There is no programmatic HTTP endpoint that accepts workspace API tokens.
+
+Attempted approaches (all failed):
+1. Direct app URL + Bearer token → redirected to login page
+2. Workspace proxy (`/apps/<name>/`) + Bearer token → same redirect
+3. Adding `"stream": False` to payload → no effect on auth
+4. SDK `w.api_client.do()` → 404 (path is a web proxy, not REST API)
+
+**Solution:** NB05 now imports and calls the agent functions directly — the same code path the deployed app runs:
+```python
+from agent_server.agent import _retrieve_context, _load_and_format_prompt, _get_openai_client, LLM_ENDPOINT_NAME
+
+def query_agent(question, max_output_tokens=500):
+    context = _retrieve_context(question)
+    formatted_prompt = _load_and_format_prompt(context=context, question=question)
+    messages = [{"role": "user", "content": formatted_prompt}]
+    client = _get_openai_client()
+    response = client.chat.completions.create(
+        model=LLM_ENDPOINT_NAME, messages=messages,
+        temperature=0.1, max_tokens=max_output_tokens,
+    )
+    return {"answer": response.choices[0].message.content}
+```
+
+This tests the full RAG pipeline (vector search → prompt → LLM) while the app status is verified separately via `w.apps.get(APP_NAME)`.
+
+**Key takeaway:** For Databricks Apps with user authorization, programmatic testing must call the agent code directly. HTTP-level testing requires browser-based OAuth or disabling user authorization.
+
+---
+
+## 9. Quick Reference
+
+### Querying the App (Browser Only)
+
+Apps with user authorization can only be queried via browser (OAuth).
+For programmatic testing from notebooks, call the agent code directly:
+```python
+from agent_server.agent import _retrieve_context, _load_and_format_prompt, _get_openai_client, LLM_ENDPOINT_NAME
+
+context = _retrieve_context("your question")
+prompt = _load_and_format_prompt(context=context, question="your question")
+client = _get_openai_client()
+response = client.chat.completions.create(
+    model=LLM_ENDPOINT_NAME,
+    messages=[{"role": "user", "content": prompt}],
+    temperature=0.1,
+)
+print(response.choices[0].message.content)
+```
+
+### Vector Search in Apps (use SDK)
+```python
+from databricks.sdk import WorkspaceClient
+w = WorkspaceClient()
+results = w.vector_search_indexes.query_index(
+    index_name="catalog.schema.index",
+    query_text="your query",
+    columns=["col1", "col2"],
+    num_results=5,
+)
+rows = results.result.data_array if results.result else []
+```
+
+### Extracting User Message (Responses API)
+```python
+for msg in request.input:
+    if msg.role == "user":
+        if isinstance(msg.content, str):
+            user_message = msg.content
+        elif isinstance(msg.content, list):
+            user_message = " ".join(
+                item.text if hasattr(item, "text") else str(item)
+                for item in msg.content
+            )
+```
+
+### Stream Done Event (plain dict, not class)
+```python
+yield ResponsesAgentStreamEvent(
+    type="response.output_item.done",
+    item={"id": item_id, "type": "message", "role": "assistant",
+          "content": [{"type": "output_text", "text": full_text}]},
 )
 ```
+
+### Grant App SP Access to Schema (DAB)
+```yaml
+resources:
+  schemas:
+    my_schema:
+      grants:
+        - principal: "${resources.apps.my_app.service_principal_client_id}"
+          privileges: [USE_SCHEMA, SELECT, EXECUTE]
+```
+
+---
+
+## 10. Historical: Model Serving Issues
+
+The following issues were encountered during the original Model Serving deployment. They are preserved here for reference but **do not apply to the current Apps architecture**.
+
+### UC Model Aliases and Tags Are Dicts, Not Lists
+
+**Error:** `'str' object has no attribute 'alias'`
+
+**Context:** Unity Catalog returns `model.aliases` as `{"alias_name": "version"}` — dicts, not lists. This was relevant when the pipeline managed `@candidate`/`@champion` aliases. In the Apps architecture, model aliases are no longer used for deployment.
+
+---
+
+### VectorSearchClient OBO Authentication
+
+**Error:** `VectorSearchClient.__init__() got an unexpected keyword argument 'workspace_client'`
+
+**Context:** The correct OBO mechanism for Model Serving was `CredentialStrategy.MODEL_SERVING_USER_CREDENTIALS`. In the Apps architecture, this is replaced by `WorkspaceClient()` which handles OAuth M2M natively (see 7.2).
+
+---
+
+### `agents.deploy()` ValueError Handling
+
+**Errors:** `Endpoint ... already serves model ...` / `Endpoint ... is currently updating.`
+
+**Context:** `agents.deploy()` was the Model Serving deployment method. In the Apps architecture, deployment uses `databricks bundle deploy` + `bundle run`. These errors no longer apply.
+
+---
+
+### Endpoint Readiness Check Loops Forever
+
+**Context:** Model Serving endpoints required polling `config_update` status with substring checks (`"READY" in str(state.ready)`). Apps use `w.apps.get(APP_NAME)` and check `app_status.state` instead (see NB05).
+
+---
+
+### ResponsesAgent Requires Responses API Format
+
+**Error:** `Model is missing inputs ['input']. Note that there were extra inputs: ['messages', 'max_tokens'].`
+
+**Context:** This applies to both Model Serving and Apps. The Responses API uses `input`/`output`, not `messages`/`choices`. Still relevant — see 8 (Quick Reference) for the correct format.
+
+---
+
+### Inference Table JSON Path Mismatch
+
+**Context:** Inference tables used Chat Completions JSON paths (`$.messages[0].content`). In the Apps architecture, monitoring uses `mlflow.search_traces()` instead of inference table SQL queries. This issue no longer applies.
+
+---
+
+### No Champion Model for Deployment
+
+**Error:** `Registered Model Alias 'champion' does not exist.`
+
+**Context:** In Model Serving, deployment was gated by the `@champion` alias. In Apps, deployment is gated by the quality gate in NB04 (which raises an exception on failure) and triggered by CLI/CI-CD, not model promotion.

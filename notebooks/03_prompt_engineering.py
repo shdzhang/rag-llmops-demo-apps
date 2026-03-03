@@ -12,7 +12,7 @@
 # MAGIC | **Prompt Management (here)** | 03 | Register, version, configure, smoke-test, alias |
 # MAGIC | Agent Evaluation | 05 | End-to-end evaluation (retrieval + prompt + LLM) with quality gates |
 # MAGIC
-# MAGIC Systematic evaluation with `mlflow.genai.evaluate()` happens in NB05, which tests
+# MAGIC Systematic evaluation with `mlflow.genai.evaluate()` happens in NB04, which tests
 # MAGIC the full RAG agent holistically. This notebook focuses on the prompt artifact itself.
 # MAGIC
 # MAGIC ## Workflow
@@ -110,8 +110,9 @@ try:
         )
         print(f"Registered v{current_prompt.version}")
 except Exception as e:
-    if "RESOURCE_DOES_NOT_EXIST" in str(e) or "not found" in str(e).lower():
-        print("Prompt not found — creating initial versions")
+    err_str = str(e)
+    if any(k in err_str for k in ("RESOURCE_DOES_NOT_EXIST", "NOT_FOUND", "does not exist")):
+        print(f"Prompt not found — creating initial versions ({type(e).__name__})")
     else:
         raise
 
@@ -163,7 +164,7 @@ print(f"Verified: model_config = {loaded.model_config}")
 # MAGIC ## Step 4: Smoke Test
 # MAGIC
 # MAGIC Quick sanity check that the prompt produces reasonable output.
-# MAGIC This is **not** a systematic evaluation — that happens in NB05 where the
+# MAGIC This is **not** a systematic evaluation — that happens in NB04 where the
 # MAGIC full RAG agent (retrieval + prompt + LLM) is scored with `mlflow.genai.evaluate()`.
 
 # COMMAND ----------
@@ -230,5 +231,5 @@ print(f"Verified: prompts:/{PROMPT_NAME}@production → v{prod_prompt.version}")
 # MAGIC | `prompt.format(...)` | Fill template variables |
 # MAGIC | `mlflow.genai.set_prompt_alias()` | Point alias to a version (hot-reload) |
 # MAGIC
-# MAGIC **Next:** NB04 logs the agent (which references this prompt), then NB05 evaluates
-# MAGIC the full RAG pipeline with `mlflow.genai.evaluate()` and quality gates.
+# MAGIC **Next:** NB04 evaluates the agent (which references this prompt) using
+# MAGIC `mlflow.genai.evaluate()` with quality gates.
