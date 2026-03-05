@@ -130,6 +130,18 @@ Data Prep            Develop & Evaluate      Deploy (CLI/CI-CD)      Monitor
 | 4 DAB jobs (data, build, deploy, monitor) | 3 independent DAB jobs (data, evaluate, monitor) |
 | Old NB04-07 (log, register, deploy) | Removed — notebooks renumbered to 01-06 |
 
+## Why Apps Over Model Serving
+
+Databricks Apps shifts agents from MDLC (Model Development Lifecycle) to SDLC (Software Development Lifecycle):
+
+- **Code is the artifact** — no `log_model()` / `register_model()` / `@champion` promotion cycle
+- **Async architecture** — `@invoke`/`@stream` with better concurrency per instance
+- **Developer-friendly** — local debugging, git versioning, IDE/AI coding tool support
+- **AgentServer integration** — compatible with Playground, Multi-Agent Supervisor, and OneChatBot
+- **Hot-reload prompts** — MLflow Prompt Registry changes take effect without redeployment
+
+Model Serving remains the GA path for agents and is not deprecated. Choose Apps when you want faster iteration and SDLC patterns; choose Model Serving when you need inference tables or GA status for agents. See [architecture docs](docs/architecture.md) for a detailed comparison and current limitations.
+
 ## Technologies
 
 - **MLflow 3.x**: AgentServer, Prompt Registry, GenAI Evaluate, Tracing

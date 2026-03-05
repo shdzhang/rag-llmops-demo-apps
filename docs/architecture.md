@@ -77,6 +77,56 @@ Deployment is a CLI/CI/CD step (`databricks bundle deploy`), not a DAB job. Jobs
 | Auth | App service principal (OAuth M2M) |
 | Orchestration | Databricks Asset Bundles (DABs) + CI/CD |
 
+## Agents on Apps: What to Know
+
+Key considerations when deploying agents as Databricks Apps (vs. Model Serving Endpoints).
+
+### Why Apps
+
+- **Targets software engineers, not data scientists** — the strategic shift is from model development lifecycle (MDLC) to software development lifecycle (SDLC). Agents are software, not models.
+- **AgentServer replaces the managed scoring server** — MLflow AgentServer is the Apps equivalent of the scoring server on Model Serving Endpoints.
+- **Developer experience advantages** — fast iteration, local debugging, git versioning, async architecture, AI coding tool support (Claude Code, Cursor), TypeScript support.
+- **Async architecture improves concurrency** — async code allows more concurrent requests per instance than sync model serving.
+- **Apps platform is GA** — only the agent-specific integration layer (AgentServer) is Public Preview. The underlying Apps infrastructure is production-grade.
+- **REST API via `DatabricksOpenAI` client** — agent apps are exposed as REST endpoints using the `app/` prefix.
+
+### When to Use Model Serving Instead
+
+- **Customer requires GA today** — Model Serving is the GA path for agents. No removal or deprecation is planned while Apps matures.
+- **Need inference tables** — Apps don't produce inference tables. Use MLflow tracing (`mlflow.openai.autolog()`) instead.
+- **Need AI Gateway at the agent level** — AI Gateway support is available at the underlying LLM endpoint layer, not at the agent/app level.
+
+### Current Limitations to Be Aware Of
+
+| Area | Limitation | Workaround |
+|------|-----------|------------|
+| **Scaling** | No scale-to-zero yet | App Spaces (MicroVM) is on the roadmap |
+| **Scaling** | No auto-scaling of core count | Horizontal scaling uses fixed cores |
+| **Timeouts** | HTTP proxy timeout is 120s (vs 297s on MSE) | Keep responses under 120s; use resume-stream patterns for long queries |
+| **Observability** | No system metrics (CPU, memory) today | OTel-based observability stack is coming |
+| **Observability** | No inference tables | Use `mlflow.search_traces()` for trace analytics |
+| **Governance** | No UC lineage for agent apps | Git lineage (commit = version) is the alternative |
+| **Governance** | No workspace permission model like MSE | Apps require OAuth token; use user authorization |
+| **Integration** | Only AgentServer-based apps integrate with Playground, MAS, and OneChatBot | Fully custom apps miss these integrations |
+
+### What's Coming
+
+- **Horizontal scaling + zero-downtime deployments** — both in progress
+- **App Spaces** — MicroVM-based, with scale-to-zero support
+- **OTel observability + Insights Dashboard** — out-of-the-box metrics, logs, and admin dashboard
+- **MLflow traces in Unity Catalog** — governed trace data in Delta tables instead of MLflow Experiment
+- **AppKit** — common development patterns SDK for Apps
+- **Git-backed apps** — direct git integration for deployments
+- **Neon Auth** — external auth backend-as-a-service for apps
+
+### Key Resources
+
+- [MLflow AgentServer Documentation](https://mlflow.org/docs/latest/genai/agent-server.html)
+- [Databricks App Templates Repository](https://github.com/databricks/app-templates)
+- [Databricks Apps Documentation](https://docs.databricks.com/en/apps/index.html)
+- [Author agents in Apps](https://learn.microsoft.com/en-us/azure/databricks/generative-ai/agent-framework/author-agent)
+- [Migrate agents from Model Serving to Apps](https://learn.microsoft.com/en-us/azure/databricks/generative-ai/agent-framework/migrate-agent-to-apps)
+
 ## Key Design Decisions
 
 1. **Direct evaluation over `log_model()`**: Import agent code directly instead of logging/loading a model — faster feedback, no serialization overhead

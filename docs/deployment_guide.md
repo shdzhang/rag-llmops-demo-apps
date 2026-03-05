@@ -188,6 +188,47 @@ jobs:
 - **Prompt-only changes**: Update prompt in NB03, run `build_evaluate` -- no
   redeploy needed since prompts hot-reload via Prompt Registry
 
+## Migration from Model Serving: Key Considerations
+
+If you are migrating an existing agent from Model Serving Endpoints (MSE) to Apps,
+keep these points in mind:
+
+### Code Changes Required
+
+1. **Agent class to async functions**: Replace `ResponsesAgent.predict_stream()` with `@invoke()` and `@stream()` decorated async functions.
+2. **Authentication**: Replace OBO/`CredentialStrategy` patterns with `WorkspaceClient()` — it natively handles Apps OAuth M2M.
+3. **Vector Search client**: Switch from `VectorSearchClient()` (needs `model-serving-user-context` header) to `w.vector_search_indexes.query_index()` (no special auth handling needed).
+4. **Model config**: Replace `ModelConfig` (baked into logged model) with environment variables in `app.yaml`.
+5. **Inference table monitoring**: Replace inference table queries with `mlflow.search_traces()` — Apps don't produce inference tables.
+
+### What Stays the Same
+
+- `ResponsesAgent` schema (input/output format) — works across both deployment modes
+- MLflow Prompt Registry — same SDK, same hot-reload behavior
+- Evaluation with `mlflow.genai.evaluate()` — same scorers, same dataset format
+- Unity Catalog for governance — schemas, catalogs, volumes all work the same
+
+### Architecture Patterns
+
+**AgentServer is required for full platform integration.** Only AgentServer-based apps integrate with:
+- Playground (test UI in the workspace)
+- Multi-Agent Supervisor (MAS)
+- OneChatBot and other first-party consumers
+
+If you build a fully custom FastAPI app (without AgentServer), you get full flexibility but lose these integrations. Choose based on your needs:
+
+| Pattern | Integration Level | Flexibility |
+|---------|------------------|-------------|
+| AgentServer + `@invoke`/`@stream` | Full (Playground, MAS, etc.) | Agent logic only |
+| Custom FastAPI + your own routes | None with Databricks tools | Full control |
+| Hybrid (AgentServer + custom routes) | Full + custom endpoints | Best of both |
+
+### Timeout Considerations
+
+- Apps HTTP proxy has a **120-second timeout** (vs. 297s on MSE)
+- For long-running queries, implement resume-stream patterns or increase concurrency
+- Async architecture helps: more concurrent requests per instance than sync MSE
+
 ## Target-Specific Notes
 
 ### Dev (`-t dev`)
