@@ -3,24 +3,42 @@
 ## Apps LLMOps Pipeline
 
 ```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│  Data Prep   │───>│  Develop &  │───>│   Deploy    │───>│  Monitor &  │
-│  (run once)  │    │  Validate   │    │  (CLI/CICD) │    │  Validate   │
-└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
-  Notebooks:         Notebooks:         CLI commands:      Notebooks:
-  01, 02             03, 04             bundle deploy      05, 06
-                                        bundle run app
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│  Data Prep   │───>│  Develop &  │───>│   Deploy    │───>│  Monitor &  │───>│  Deployment │
+│  (run once)  │    │  Validate   │    │  (CI/CD)    │    │  Validate   │    │  Manifest   │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+  Notebooks:         Notebooks:         CI/CD pipeline:    Notebooks:         Notebook:
+  01, 02             03, 04             dev → prod         05, 06             07
+                                                                ↓
+                                                     ┌──────────────────┐
+                                                     │ Feedback Loop:   │
+                                                     │ traces → eval    │
+                                                     │ dataset (Delta)  │
+                                                     └────────┬─────────┘
+                                                              ↓
+                                                     Back to NB04 as
+                                                     regression cases
 ```
 
-### DAB Jobs (independent, no orchestrator)
+### Environments
+
+| Environment | Target | Mode | Purpose |
+|------------|--------|------|---------|
+| **dev** | `-t dev` | `development` | Personal sandbox, rapid iteration, CI eval on merge |
+| **prod** | `-t prod` | `production` | Production, promoted after eval passes + manual approval |
+
+Each environment has its own app, experiment, and schema — completely isolated.
+
+### DAB Jobs
 
 | Job | Notebooks | When to run |
 |-----|-----------|-------------|
 | `data_preparation` | 01, 02 | Once, or when documents change |
 | `build_evaluate` | 03, 04 | Each code/prompt change (inner dev loop) |
-| `monitoring` | 05, 06 | Scheduled every 6h (post-deploy validation) |
+| `monitoring` | 05, 06 | Scheduled every 6h (post-deploy validation + alerting) |
+| `deployment_manifest` | 07 | After each deploy (tracks git SHA, prompt version, eval run) |
 
-Deployment is a CLI/CI/CD step (`databricks bundle deploy`), not a DAB job. Jobs are run independently — there is no end-to-end orchestrator because the deploy step (CLI) breaks the chain.
+Deployment is a CI/CD step (see `.github/workflows/deploy.yml`), not a DAB job. CI evaluates in dev, then promotes to prod with manual approval.
 
 ## Component Details
 
@@ -35,32 +53,45 @@ Deployment is a CLI/CI/CD step (`databricks bundle deploy`), not a DAB job. Jobs
 - Attach model configuration (temperature, max_tokens)
 - Set `@production` alias — hot-reloads without redeployment
 
-### 3. Agent Evaluation (04)
-- Imports agent code **directly** from `agent_server/agent.py`
-- Calls the same retrieval + LLM pipeline that runs in production
-- **mlflow.genai.evaluate()** with `Correctness` scorer
-- Quality gates: fails the pipeline if thresholds not met
-- Additional quality checks (tone, safety, groundedness) run in production via External Monitor (NB06)
+### 3. Agent Evaluation (04) — Three-Tier Strategy
+- **Tier 1 (local, seconds)**: `uv run pytest` — unit tests with mocked dependencies
+- **Tier 2 (CI, minutes)**: NB04 — evaluates against real endpoints with quality gate
+  - Imports agent code **directly** from `agent_server/agent.py`
+  - Static eval dataset + **production regression cases** from `{catalog}.{schema}.eval_dataset`
+  - **mlflow.genai.evaluate()** with `Correctness` scorer
+  - Quality gates: fails the pipeline if thresholds not met
+- **Tier 3 (production, continuous)**: External Monitor judges (NB06)
+  - Feeds back low-quality traces as regression test cases (closes the loop)
 
-### 4. Deployment (CLI/CI-CD)
-- `databricks bundle deploy -t prod` uploads code and config
-- `databricks bundle run corp_chatbot_app -t prod` starts the app
+### 4. Deployment (CI/CD Pipeline)
+- **CI/CD workflow** (`.github/workflows/deploy.yml`) automates the full pipeline:
+  - PR: validate bundle only (fast, no cost)
+  - Merge to main: validate → evaluate (dev) → deploy prod (manual approval)
+  - Prod promotion requires manual approval via GitHub Environment protection rules
 - App resources (experiment, LLM endpoint, VS index) declared in `databricks.yml`
 - App service principal gets auto-provisioned grants
-- Git commit = version; rollback = redeploy previous commit
+- Git commit = version; rollback = `scripts/rollback.sh` or `git revert` + CI re-run
 
 ### 5. Smoke Tests & Monitoring (05, 06)
 - **NB05:** Post-deploy smoke tests
   - Verifies app status via SDK, then calls agent code directly
   - Basic queries, edge cases, latency benchmarks
   - Uses direct function import (Apps with user auth require browser OAuth)
-- **NB06:** Trace-based production monitoring
-  - **MLflow External Monitor** for automated quality assessment
+- **NB06:** Trace-based production monitoring with three parts:
+  - **Part A — MLflow External Monitor**: Automated quality assessment
     - Built-in judges: safety, groundedness, relevance
     - Custom guideline judges: accuracy, professional tone
     - Configurable sampling rate
-  - **Trace analytics** via `mlflow.search_traces()`
+  - **Part B — Trace analytics** via `mlflow.search_traces()`
     - Query volume, latency (P50/P95/P99), error rates
+    - **Threshold-based alerting**: error rate > 5%, P95 latency > 30s → alerts written to `{catalog}.{schema}.monitoring_alerts` Delta table
+  - **Part C — Production feedback loop**: Exports error traces to `{catalog}.{schema}.eval_dataset` Delta table, consumed by NB04 as regression test cases
+
+### 6. Deployment Manifest (07)
+- Logs deployment metadata as an MLflow run with tags:
+  - Git commit SHA + branch, prompt name + version, eval run ID, app URL, timestamp
+- Answers "What version is deployed in prod right now?"
+- Queryable via `mlflow.search_runs()` with `tags.deployment.target = 'prod'`
 
 ## Technology Stack
 
@@ -134,7 +165,10 @@ Key considerations when deploying agents as Databricks Apps (vs. Model Serving E
 3. **`WorkspaceClient` over `VectorSearchClient`**: Natively handles Apps OAuth M2M authentication
 4. **Deployment as CI/CD, not a job**: Avoids circular dependency (job deploying the bundle that defines the job)
 5. **Trace-based monitoring over inference tables**: Apps don't produce inference tables; MLflow traces via `autolog()` are the primary signal
-6. **Independent jobs, no orchestrator**: Deployment is CLI/CI/CD, breaking the linear chain; each job runs on its own schedule
+6. **Two environments (dev/prod)**: Dev validates before production, each with isolated resources
+7. **Production feedback loop**: Error traces automatically become regression test cases — eval dataset grows with real usage
+8. **Deployment manifest as MLflow run**: Every deployment is tracked with git SHA + prompt version — answers "what's deployed?"
+9. **Threshold-based alerting to Delta**: Monitoring alerts stored in a Delta table consumable by DBSQL Alerts or Notification Destinations
 
 ## Comparison with Model Serving Architecture
 
@@ -148,6 +182,11 @@ Key considerations when deploying agents as Databricks Apps (vs. Model Serving E
 | Deployment | `agents.deploy(model, version)` | `databricks bundle deploy` |
 | Auth (Vector Search) | OBO via `CredentialStrategy` | `WorkspaceClient()` (OAuth M2M) |
 | Monitoring data source | Inference tables (automatic) | MLflow traces (via autolog) |
-| Pipeline stages | 4 chained jobs (data, build, deploy, monitor) | 3 independent jobs + CLI deploy |
-| Notebooks | 01-09 (all used) | 01-06 (contiguous) |
+| Pipeline stages | 4 chained jobs (data, build, deploy, monitor) | 4 independent jobs + CI/CD deploy |
+| Notebooks | 01-09 (all used) | 01-07 (contiguous) |
 | Config management | `ModelConfig` baked into model | Env vars in `app.yaml` |
+| Environments | Single target | dev / prod (isolated) |
+| Deployment tracking | Model version in UC | MLflow run with git SHA + prompt version |
+| Eval dataset | Static | Static + production regression feedback |
+| Alerting | None | Threshold-based alerts to Delta table |
+| Rollback mechanism | Revert model alias | `scripts/rollback.sh` (code) or alias change (prompts) |

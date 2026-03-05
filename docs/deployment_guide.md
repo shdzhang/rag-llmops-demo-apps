@@ -41,15 +41,16 @@ In the Apps deployment model, the **source code is the deployment artifact**
 └──────────────────────────────────────────────────────────┘
 ```
 
-### DAB Jobs (independent, no orchestrator)
+### DAB Jobs
 
 | Job | Notebooks | When to run |
 |-----|-----------|-------------|
 | `data_preparation` | 01, 02 | Once, or when documents change |
 | `build_evaluate` | 03, 04 | Each code/prompt change (inner dev loop) |
-| `monitoring` | 05, 06 | Scheduled every 6h (post-deploy validation) |
+| `monitoring` | 05, 06 | Scheduled every 6h (post-deploy validation + alerting) |
+| `deployment_manifest` | 07 | After each deploy (tracks git SHA, prompt version) |
 
-**Deployment is a CLI/CI/CD step**, not a DAB job. Jobs run independently — there is no end-to-end orchestrator because the deploy step (CLI) breaks the chain.
+**Deployment is a CI/CD step** (see `.github/workflows/deploy.yml`). The pipeline evaluates in dev, then promotes to prod with manual approval.
 
 ## First-Time Deployment (4 Phases)
 
@@ -119,74 +120,70 @@ databricks bundle deploy -t prod && \
 
 ## CI/CD Pipeline
 
-For automated deployments, use the following GitHub Actions workflow:
+The actual GitHub Actions workflow is at `.github/workflows/deploy.yml`. It
+implements a dev-validated promotion model:
 
-```yaml
-# .github/workflows/deploy.yml
-name: Deploy RAG Agent
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-env:
-  DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
-  DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_SP_CLIENT_ID }}
-  DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_SP_CLIENT_SECRET }}
-  TARGET: prod
-
-jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: databricks/setup-cli@main
-      - run: databricks bundle validate -t ${{ env.TARGET }}
-
-  evaluate:
-    needs: validate
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: databricks/setup-cli@main
-      - name: Deploy bundle (infra + jobs)
-        run: databricks bundle deploy -t ${{ env.TARGET }}
-      - name: Run evaluation pipeline
-        run: databricks bundle run build_evaluate -t ${{ env.TARGET }}
-        # NB04 enforces quality gates -- job fails if thresholds not met
-
-  deploy:
-    needs: evaluate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: databricks/setup-cli@main
-      - name: Deploy and start app
-        run: |
-          databricks bundle deploy -t ${{ env.TARGET }}
-          databricks bundle run corp_chatbot_app -t ${{ env.TARGET }}
-
-  smoke-test:
-    needs: deploy
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: databricks/setup-cli@main
-      - name: Run smoke tests + monitoring
-        run: databricks bundle run monitoring -t ${{ env.TARGET }}
 ```
+PR opened        →  validate (dev + prod bundles)
+Merge to main    →  validate → evaluate (dev) → deploy prod (manual approval)
+```
+
+### Pipeline Flow
+
+| Stage | Job | Target | What Happens |
+|-------|-----|--------|-------------|
+| 1 | `validate` | dev + prod | Bundle validation (fast, no cost) |
+| 2 | `evaluate` | dev | Deploy infra, run `build_evaluate` (quality gate) |
+| 3 | `deploy-prod` | prod | **Manual approval**, then deploy + start app + smoke test + manifest |
 
 ### Key CI/CD Patterns
 
 - **PR builds**: Run `validate` only (fast, no cost)
-- **Main branch**: Full pipeline (validate -> evaluate -> deploy -> smoke test)
-- **Quality gate**: NB04 raises an exception if thresholds fail, blocking deployment
-- **Rollback**: Revert the git commit and re-run the pipeline
-- **Prompt-only changes**: Update prompt in NB03, run `build_evaluate` -- no
+- **Main branch**: Evaluate in dev, then promote to prod
+- **Prod promotion**: Requires manual approval via GitHub Environment protection rules
+- **Quality gate**: NB04 raises an exception if thresholds fail, blocking the pipeline
+- **Deployment manifest**: NB07 logs git SHA, prompt version, and eval run ID to MLflow after each deploy
+- **Rollback**: `scripts/rollback.sh <target> <commit-sha>` or `git revert` + CI re-run
+- **Prompt-only changes**: Update prompt in NB03, run `build_evaluate` — no
   redeploy needed since prompts hot-reload via Prompt Registry
+
+### GitHub Secrets Required
+
+| Secret | Description |
+|--------|-------------|
+| `DATABRICKS_HOST` | Workspace URL |
+| `DATABRICKS_SP_CLIENT_ID` | Service principal client ID |
+| `DATABRICKS_SP_CLIENT_SECRET` | Service principal secret |
+
+## Rollback Procedures
+
+### Code Rollback
+
+Use the provided script to roll back to any previous git commit:
+
+```bash
+./scripts/rollback.sh prod abc1234
+./scripts/rollback.sh dev HEAD~1
+```
+
+This checks out the commit, runs `databricks bundle deploy`, starts the app, and
+runs smoke tests. You end up in detached HEAD state — `git checkout main` to return.
+
+Alternatively, `git revert <commit>` and push to trigger CI/CD re-deployment.
+
+### Prompt Rollback
+
+Prompt changes are independent of code deploys. To roll back a prompt:
+
+```bash
+# List prompt versions
+mlflow prompts list-versions <catalog>.<schema>.rag_prompt
+
+# Set @production alias to a previous version (takes effect immediately)
+mlflow prompts set-alias <catalog>.<schema>.rag_prompt production <version>
+```
+
+No app restart needed — the agent loads the prompt by alias on each request.
 
 ## Migration from Model Serving: Key Considerations
 
@@ -237,13 +234,14 @@ If you build a fully custom FastAPI app (without AgentServer), you get full flex
 - Schema becomes `dev_<username>_corp_affairs`
 - App name stays as-is (not prefixed)
 - Safe to redeploy frequently
+- Use for local iteration and experimentation
 
 ### Prod (`-t prod`)
 
 - `mode: production` requires `workspace.root_path`
-- No name prefixing -- resources use exact names
+- No name prefixing — resources use exact names
 - App name is the production name visible to users
-- Deploy carefully, test in dev first
+- Only deployed after dev evaluation + manual approval
 
 ## Troubleshooting
 

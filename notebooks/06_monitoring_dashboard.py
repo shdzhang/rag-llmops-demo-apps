@@ -284,6 +284,131 @@ else:
 
 # COMMAND ----------
 # MAGIC %md
+# MAGIC ### 5. Alerting Thresholds
+# MAGIC
+# MAGIC Check key metrics against thresholds and write alerts to a Delta table.
+# MAGIC Downstream systems (DBSQL Alerts, Notification Destinations) can consume
+# MAGIC this table to send Slack/email notifications.
+
+# COMMAND ----------
+
+ALERT_TABLE = f"{CATALOG}.{SCHEMA}.monitoring_alerts"
+
+ALERT_THRESHOLDS = {
+    "error_rate_pct": 5.0,
+    "p95_latency_ms": 30000,
+}
+
+alerts = []
+
+_state_col_alert = "state" if "state" in traces_df.columns else "status" if "status" in traces_df.columns else None
+if _state_col_alert:
+    total = len(traces_df)
+    errors = (traces_df[_state_col_alert] == "ERROR").sum()
+    error_rate = (errors / total * 100) if total > 0 else 0
+    if error_rate > ALERT_THRESHOLDS["error_rate_pct"]:
+        alerts.append({
+            "alert_type": "error_rate",
+            "metric_value": round(error_rate, 2),
+            "threshold": ALERT_THRESHOLDS["error_rate_pct"],
+            "message": f"Error rate {error_rate:.1f}% exceeds threshold {ALERT_THRESHOLDS['error_rate_pct']}%",
+            "severity": "HIGH",
+            "triggered_at": datetime.now().isoformat(),
+            "app_name": APP_NAME,
+        })
+
+if latency_col and 'latency_series' in dir() and not latency_series.empty:
+    p95 = latency_series.quantile(0.95)
+    if p95 > ALERT_THRESHOLDS["p95_latency_ms"]:
+        alerts.append({
+            "alert_type": "p95_latency",
+            "metric_value": round(p95, 0),
+            "threshold": ALERT_THRESHOLDS["p95_latency_ms"],
+            "message": f"P95 latency {p95:.0f}ms exceeds threshold {ALERT_THRESHOLDS['p95_latency_ms']}ms",
+            "severity": "MEDIUM",
+            "triggered_at": datetime.now().isoformat(),
+            "app_name": APP_NAME,
+        })
+
+if alerts:
+    print(f"ALERTS TRIGGERED: {len(alerts)}")
+    for a in alerts:
+        print(f"  [{a['severity']}] {a['message']}")
+    try:
+        alerts_sdf = spark.createDataFrame(alerts)
+        alerts_sdf.write.mode("append").option("mergeSchema", "true").saveAsTable(ALERT_TABLE)
+        print(f"  Alerts written to {ALERT_TABLE}")
+    except Exception as _ae:
+        print(f"  Could not write alerts to Delta: {_ae}")
+else:
+    print("All metrics within thresholds — no alerts triggered")
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ---
+# MAGIC ## Part C: Production Feedback Loop
+# MAGIC
+# MAGIC Export traces with errors or low quality scores to a Delta eval dataset.
+# MAGIC NB04 reads from this table during evaluation, so bad production results
+# MAGIC automatically become regression test cases.
+
+# COMMAND ----------
+
+EVAL_DATASET_TABLE = f"{CATALOG}.{SCHEMA}.eval_dataset"
+
+def export_traces_to_eval_dataset(traces: pd.DataFrame, table_name: str):
+    """Export error and low-quality traces to the eval dataset Delta table."""
+    _state = "state" if "state" in traces.columns else "status" if "status" in traces.columns else None
+    if _state is None or traces.empty:
+        print("No traces to export (missing state column or empty)")
+        return 0
+
+    error_traces = traces[traces[_state] == "ERROR"].copy()
+
+    candidates = error_traces.head(20)
+    if candidates.empty:
+        print("No error traces found to export — eval dataset unchanged")
+        return 0
+
+    export_rows = []
+    for _, row in candidates.iterrows():
+        request_col = "request" if "request" in row.index else None
+        question = None
+        if request_col and row[request_col] is not None:
+            req = row[request_col]
+            if isinstance(req, str):
+                question = req
+            elif isinstance(req, dict):
+                question = req.get("input", req.get("question", str(req)))
+            elif isinstance(req, list) and len(req) > 0:
+                first = req[0]
+                if isinstance(first, dict):
+                    question = first.get("content", str(first))
+                else:
+                    question = str(first)
+
+        if question:
+            export_rows.append({
+                "question": str(question)[:2000],
+                "source": "production_error",
+                "trace_id": row.get("trace_id", ""),
+                "exported_at": datetime.now().isoformat(),
+            })
+
+    if not export_rows:
+        print("Could not extract questions from error traces")
+        return 0
+
+    export_df = spark.createDataFrame(export_rows)
+    export_df.write.mode("append").option("mergeSchema", "true").saveAsTable(table_name)
+    print(f"Exported {len(export_rows)} traces to {table_name}")
+    return len(export_rows)
+
+
+exported_count = export_traces_to_eval_dataset(traces_df, EVAL_DATASET_TABLE)
+
+# COMMAND ----------
+# MAGIC %md
 # MAGIC ---
 # MAGIC ## Summary
 
@@ -306,8 +431,12 @@ Part B - Trace-Based Analytics:
   Traces:      {len(traces_df) if 'traces_df' in dir() else 'N/A'}
   Metrics:     Volume, latency, errors
 
+Part C - Production Feedback Loop:
+  Target:      {EVAL_DATASET_TABLE}
+  Exported:    {exported_count if 'exported_count' in dir() else 'N/A'} traces
+  Consumed by: NB04 (agent evaluation) as regression test cases
+
 Recommended next steps:
   1. Review traces in the MLflow Experiment UI
-  2. Create Databricks SQL Alerts for error rate and latency
-  3. Adjust sample rate for high-traffic production (e.g., 0.1 for 10%)
+  2. Adjust sample rate for high-traffic production (e.g., 0.1 for 10%)
 """)

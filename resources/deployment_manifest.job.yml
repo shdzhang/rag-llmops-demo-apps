@@ -1,0 +1,29 @@
+resources:
+  jobs:
+    deployment_manifest:
+      name: "Deployment Manifest"
+      queue:
+        enabled: true
+      parameters:
+        - name: "catalog_name"
+          default: "${var.catalog_name}"
+        - name: "schema_name"
+          default: "${resources.schemas.corporate_schema.name}"
+        - name: "experiment_name"
+          default: "${resources.experiments.experiment.name}"
+        - name: "app_name"
+          default: "${var.app_name}"
+        - name: "target"
+          default: "${bundle.target}"
+      tasks:
+        - task_key: log_manifest
+          notebook_task:
+            notebook_path: ../notebooks/07_deployment_manifest.py
+            base_parameters:
+              catalog_name: "{{job.parameters.catalog_name}}"
+              schema_name: "{{job.parameters.schema_name}}"
+              experiment_name: "{{job.parameters.experiment_name}}"
+              app_name: "{{job.parameters.app_name}}"
+              target: "{{job.parameters.target}}"
+      tags:
+        Project: "${bundle.name}"

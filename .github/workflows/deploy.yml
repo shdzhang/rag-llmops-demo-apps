@@ -1,0 +1,54 @@
+name: Deploy RAG Agent
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+  DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_SP_CLIENT_ID }}
+  DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_SP_CLIENT_SECRET }}
+
+jobs:
+  # ── PR builds: validate only (fast, no cost) ──────────────────────────
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - name: Validate dev bundle
+        run: databricks bundle validate -t dev
+      - name: Validate prod bundle
+        run: databricks bundle validate -t prod
+
+  # ── Main branch: evaluate agent quality ────────────────────────────────
+  evaluate:
+    needs: validate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - name: Deploy dev infrastructure
+        run: databricks bundle deploy -t dev
+      - name: Run evaluation pipeline (quality gate)
+        run: databricks bundle run build_evaluate -t dev
+
+  # ── Deploy to prod (manual approval via GitHub Environment) ────────────
+  deploy-prod:
+    needs: evaluate
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: databricks/setup-cli@main
+      - name: Deploy and start prod app
+        run: |
+          databricks bundle deploy -t prod
+          databricks bundle run corp_chatbot_app -t prod
+      - name: Run prod smoke tests
+        run: databricks bundle run monitoring -t prod
+      - name: Log deployment manifest
+        run: databricks bundle run deployment_manifest -t prod

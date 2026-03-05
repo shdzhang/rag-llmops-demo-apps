@@ -126,7 +126,31 @@ eval_data = [
 ]
 
 eval_df = pd.DataFrame(eval_data)
-print(f"Evaluation dataset: {len(eval_df)} test cases")
+print(f"Static evaluation cases: {len(eval_df)}")
+
+# --- Load regression cases from production feedback loop ---
+EVAL_DATASET_TABLE = f"{CATALOG}.{SCHEMA}.eval_dataset"
+try:
+    regression_sdf = spark.table(EVAL_DATASET_TABLE)
+    regression_pd = regression_sdf.select("question").distinct().toPandas()
+    if not regression_pd.empty:
+        static_questions = set(row["question"] for row in eval_data)
+        new_cases = []
+        for _, row in regression_pd.iterrows():
+            q = row["question"]
+            if q not in static_questions:
+                new_cases.append({
+                    "inputs": {"question": q},
+                    "expectations": {},
+                })
+        if new_cases:
+            regression_df = pd.DataFrame(new_cases)
+            eval_df = pd.concat([eval_df, regression_df], ignore_index=True)
+            print(f"Production regression cases added: {len(new_cases)}")
+except Exception as _e:
+    print(f"No production eval dataset yet ({type(_e).__name__}) — using static cases only")
+
+print(f"Total evaluation cases: {len(eval_df)}")
 eval_df.head()
 
 # COMMAND ----------
