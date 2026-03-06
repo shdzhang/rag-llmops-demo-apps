@@ -101,8 +101,6 @@ def check_prerequisites() -> dict[str, bool]:
 
     prereqs = {
         "uv": command_exists("uv"),
-        "node": command_exists("node"),
-        "npm": command_exists("npm"),
         "databricks": command_exists("databricks"),
     }
 
@@ -111,10 +109,6 @@ def check_prerequisites() -> dict[str, bool]:
             try:
                 if name == "uv":
                     version = get_command_output(["uv", "--version"])
-                elif name == "node":
-                    version = get_command_output(["node", "--version"])
-                elif name == "npm":
-                    version = get_command_output(["npm", "--version"])
                 elif name == "databricks":
                     version = get_command_output(["databricks", "--version"])
                 print_success(f"{name} is installed: {version}")
@@ -132,9 +126,6 @@ def check_missing_prerequisites(prereqs: dict[str, bool]) -> list[str]:
 
     if not prereqs["uv"]:
         missing.append("uv - Install with: curl -LsSf https://astral.sh/uv/install.sh | sh")
-
-    if not prereqs["node"] or not prereqs["npm"]:
-        missing.append("Node.js 20 - Install with: nvm install 20 (or download from nodejs.org)")
 
     if not prereqs["databricks"]:
         if platform.system() == "Darwin":

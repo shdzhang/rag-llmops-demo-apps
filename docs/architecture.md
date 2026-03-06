@@ -147,6 +147,18 @@ Key considerations when deploying agents as Databricks Apps (vs. Model Serving E
 - [Author agents in Apps](https://learn.microsoft.com/en-us/azure/databricks/generative-ai/agent-framework/author-agent)
 - [Migrate agents from Model Serving to Apps](https://learn.microsoft.com/en-us/azure/databricks/generative-ai/agent-framework/migrate-agent-to-apps)
 
+## Deployment Version Tracking
+
+Apps-based agents use git as the versioning mechanism instead of UC model versions.
+`start_server.py` calls `setup_mlflow_git_based_version_tracking()` at startup,
+which records the current git SHA in each MLflow trace. This provides:
+
+- **Trace-to-commit mapping**: Every trace is tagged with the exact git commit that produced it, enabling precise debugging and rollback decisions.
+- **Prompt version correlation**: Combined with MLflow Prompt Registry version metadata, you can see which code + prompt combination generated any given response.
+- **No extra infrastructure**: Works automatically — no CI metadata injection or custom tagging required.
+
+The git SHA is visible in the MLflow Experiment UI under the trace's system tags.
+
 ## Key Design Decisions
 
 1. **Direct evaluation over `log_model()`**: Import agent code directly instead of logging/loading a model — faster feedback, no serialization overhead

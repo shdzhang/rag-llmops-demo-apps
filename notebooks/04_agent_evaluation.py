@@ -239,7 +239,10 @@ if not bundle_root.startswith("/Workspace"):
 if bundle_root not in sys.path:
     sys.path.insert(0, bundle_root)
 
-from agent_server.agent import _retrieve_context, _load_and_format_prompt, _get_openai_client, LLM_ENDPOINT_NAME
+from agent_server.agent import _retrieve_context, _load_and_format_prompt, LLM_ENDPOINT_NAME
+from databricks_openai import DatabricksOpenAI
+
+_sync_client = DatabricksOpenAI()
 
 print(f"Agent imported directly from agent_server.agent")
 print(f"  LLM endpoint: {LLM_ENDPOINT_NAME}")
@@ -252,18 +255,17 @@ def predict_fn(question: str) -> str:
     Calls the same retrieval and LLM pipeline as the deployed agent.
 
     Runs _retrieve_context -> _load_and_format_prompt -> LLM call, matching
-    the exact code path in agent_server/agent.py.
+    the exact code path in agent_server/agent.py (sync variant for notebooks).
     """
     context = _retrieve_context(question)
-    formatted_prompt = _load_and_format_prompt(context=context, question=question)
+    formatted_prompt, model_config = _load_and_format_prompt(context=context, question=question)
     messages = [{"role": "user", "content": formatted_prompt}]
 
-    client = _get_openai_client()
-    response = client.chat.completions.create(
+    response = _sync_client.chat.completions.create(
         model=LLM_ENDPOINT_NAME,
         messages=messages,
-        temperature=0.1,
-        max_tokens=1000,
+        temperature=model_config.get("temperature", 0.1),
+        max_tokens=model_config.get("max_tokens", 1000),
     )
     return response.choices[0].message.content
 

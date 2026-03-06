@@ -1,5 +1,8 @@
 command: ["uv", "run", "start-app"]
 
+# NOTE: app.yaml does NOT support DAB variable substitution.
+# The values below must be kept in sync with the corresponding variables
+# in databricks.yml manually. See docs/deployment_guide.md for details.
 env:
   - name: MLFLOW_TRACKING_URI
     value: "databricks"
@@ -13,10 +16,13 @@ env:
     value: "300"
   - name: MLFLOW_EXPERIMENT_ID
     valueFrom: "experiment"
+  # Must match var.llm_endpoint in databricks.yml
   - name: LLM_ENDPOINT
     value: "databricks-claude-sonnet-4-5"
+  # Must match ${var.catalog_name}.${var.schema_name}.docs_index in databricks.yml
   - name: VECTOR_SEARCH_INDEX
     value: "shidong_catalog.corp_affairs.docs_index"
+  # Must match ${var.catalog_name}.${var.schema_name}.${var.prompt_base_name} in databricks.yml
   - name: PROMPT_NAME
     value: "shidong_catalog.corp_affairs.rag_prompt"
   - name: PROMPT_ALIAS

@@ -34,6 +34,8 @@ jobs:
       - name: Deploy dev infrastructure
         run: databricks bundle deploy -t dev
       - name: Run evaluation pipeline (quality gate)
+        # NB04 raises Exception on quality-gate failure, which fails this job
+        # and blocks the deploy-prod stage. No explicit gate check needed.
         run: databricks bundle run build_evaluate -t dev
 
   # ── Deploy to prod (manual approval via GitHub Environment) ────────────

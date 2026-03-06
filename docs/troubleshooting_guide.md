@@ -15,7 +15,6 @@ Issues encountered during development and deployment. Each entry includes the er
 7. [Databricks Apps Runtime](#7-databricks-apps-runtime)
 8. [Apps OAuth & Programmatic Testing](#8-apps-oauth--programmatic-testing)
 9. [Quick Reference](#9-quick-reference)
-10. [Historical: Model Serving Issues](#10-historical-model-serving-issues)
 
 ---
 
@@ -101,10 +100,10 @@ mlflow.set_experiment(EXPERIMENT_NAME)
 
 **Symptom:** `mlflow.genai.evaluate()` ran for 10+ hours before being cancelled.
 
-**Cause:** 3 scorers x 12 test cases = 36 judge calls hitting a rate-limited endpoint, each sending large prompts.
+**Cause:** Too many scorers x test cases = excessive judge calls hitting a rate-limited endpoint, each sending large prompts.
 
 **Fix:**
-1. **1 scorer** (`Correctness` only) — additional quality checks run in production via External Monitor (NB05)
+1. **Keep scorers lean** — NB04 uses 1 scorer (`Correctness`); the local evaluator (`evaluate_agent.py`) uses 4 (`RelevanceToQuery`, `Safety`, `Fluency`, `Completeness`). Additional quality checks run in production via External Monitor (NB05).
 2. **Claude Opus 4.1** as judge (`databricks:/databricks-claude-opus-4-1`)
 3. **8 test cases** (down from 12)
 4. Concurrency env vars: `MLFLOW_GENAI_EVAL_MAX_WORKERS=4`, `MLFLOW_GENAI_EVAL_MAX_SCORER_WORKERS=2`
@@ -215,8 +214,13 @@ Malformed model uri 'databricks-claude-opus-4-1'
 
 ### 4.4 `get_open_ai_client()` Deprecated
 
-**Fix:** Replace with:
+**Fix:** Replace with `AsyncDatabricksOpenAI` for async agent code, or `DatabricksOpenAI` for sync notebook code:
 ```python
+# Async (agent_server/agent.py):
+from databricks_openai import AsyncDatabricksOpenAI
+client = AsyncDatabricksOpenAI()
+
+# Sync (notebooks):
 from databricks_openai import DatabricksOpenAI
 client = DatabricksOpenAI()
 ```
@@ -461,17 +465,17 @@ TypeError: Object of type ResponseInputTextParam is not JSON serializable
 
 **Cause:** In the Responses API, `msg.content` can be a `str` or `list[ResponseInputTextParam]`. The chat UI sends structured content. The agent assumed it was always a string.
 
-**Fix:** Handle both:
+**Fix:** The agent uses a helper function to handle both formats:
 ```python
-for msg in request.input:
-    if msg.role == "user":
-        if isinstance(msg.content, str):
-            user_message = msg.content
-        elif isinstance(msg.content, list):
-            user_message = " ".join(
-                item.text if hasattr(item, "text") else str(item)
-                for item in msg.content
-            )
+def _extract_message_text(msg) -> str:
+    if isinstance(msg.content, str):
+        return msg.content
+    if isinstance(msg.content, list):
+        return " ".join(
+            item.text if hasattr(item, "text") else str(item)
+            for item in msg.content
+        )
+    return str(msg.content) if msg.content else ""
 ```
 
 ---
@@ -550,17 +554,21 @@ url=https://adb-xxx.azuredatabricks.net/login.html?...redirect_uri=...corp-chatb
 ### Querying the App (Browser Only)
 
 Apps with user authorization can only be queried via browser (OAuth).
-For programmatic testing from notebooks, call the agent code directly:
+For programmatic testing from notebooks, call the agent code directly using a
+sync client (the agent's `_get_openai_client()` returns an async client):
 ```python
-from agent_server.agent import _retrieve_context, _load_and_format_prompt, _get_openai_client, LLM_ENDPOINT_NAME
+from agent_server.agent import _retrieve_context, _load_and_format_prompt, LLM_ENDPOINT_NAME
+from databricks_openai import DatabricksOpenAI
 
 context = _retrieve_context("your question")
-prompt = _load_and_format_prompt(context=context, question="your question")
-client = _get_openai_client()
+formatted_prompt, model_config = _load_and_format_prompt(context=context, question="your question")
+
+client = DatabricksOpenAI()
 response = client.chat.completions.create(
     model=LLM_ENDPOINT_NAME,
-    messages=[{"role": "user", "content": prompt}],
-    temperature=0.1,
+    messages=[{"role": "user", "content": formatted_prompt}],
+    temperature=model_config.get("temperature", 0.1),
+    max_tokens=model_config.get("max_tokens", 1000),
 )
 print(response.choices[0].message.content)
 ```
@@ -579,16 +587,28 @@ rows = results.result.data_array if results.result else []
 ```
 
 ### Extracting User Message (Responses API)
+
+The agent uses `_extract_message_text()` to handle both `str` and `list` content
+formats, and preserves full conversation history for multi-turn support:
 ```python
+def _extract_message_text(msg) -> str:
+    if isinstance(msg.content, str):
+        return msg.content
+    if isinstance(msg.content, list):
+        return " ".join(
+            item.text if hasattr(item, "text") else str(item)
+            for item in msg.content
+        )
+    return str(msg.content) if msg.content else ""
+
+history = []
+last_user_message = ""
 for msg in request.input:
-    if msg.role == "user":
-        if isinstance(msg.content, str):
-            user_message = msg.content
-        elif isinstance(msg.content, list):
-            user_message = " ".join(
-                item.text if hasattr(item, "text") else str(item)
-                for item in msg.content
-            )
+    text = _extract_message_text(msg)
+    if msg.role in ("user", "assistant"):
+        history.append({"role": msg.role, "content": text})
+    if msg.role == "user" and text:
+        last_user_message = text
 ```
 
 ### Stream Done Event (plain dict, not class)
@@ -609,59 +629,3 @@ resources:
         - principal: "${resources.apps.my_app.service_principal_client_id}"
           privileges: [USE_SCHEMA, SELECT, EXECUTE]
 ```
-
----
-
-## 10. Historical: Model Serving Issues
-
-The following issues were encountered during the original Model Serving deployment. They are preserved here for reference but **do not apply to the current Apps architecture**.
-
-### UC Model Aliases and Tags Are Dicts, Not Lists
-
-**Error:** `'str' object has no attribute 'alias'`
-
-**Context:** Unity Catalog returns `model.aliases` as `{"alias_name": "version"}` — dicts, not lists. This was relevant when the pipeline managed `@candidate`/`@champion` aliases. In the Apps architecture, model aliases are no longer used for deployment.
-
----
-
-### VectorSearchClient OBO Authentication
-
-**Error:** `VectorSearchClient.__init__() got an unexpected keyword argument 'workspace_client'`
-
-**Context:** The correct OBO mechanism for Model Serving was `CredentialStrategy.MODEL_SERVING_USER_CREDENTIALS`. In the Apps architecture, this is replaced by `WorkspaceClient()` which handles OAuth M2M natively (see 7.2).
-
----
-
-### `agents.deploy()` ValueError Handling
-
-**Errors:** `Endpoint ... already serves model ...` / `Endpoint ... is currently updating.`
-
-**Context:** `agents.deploy()` was the Model Serving deployment method. In the Apps architecture, deployment uses `databricks bundle deploy` + `bundle run`. These errors no longer apply.
-
----
-
-### Endpoint Readiness Check Loops Forever
-
-**Context:** Model Serving endpoints required polling `config_update` status with substring checks (`"READY" in str(state.ready)`). Apps use `w.apps.get(APP_NAME)` and check `app_status.state` instead (see NB05 monitoring).
-
----
-
-### ResponsesAgent Requires Responses API Format
-
-**Error:** `Model is missing inputs ['input']. Note that there were extra inputs: ['messages', 'max_tokens'].`
-
-**Context:** This applies to both Model Serving and Apps. The Responses API uses `input`/`output`, not `messages`/`choices`. Still relevant — see 8 (Quick Reference) for the correct format.
-
----
-
-### Inference Table JSON Path Mismatch
-
-**Context:** Inference tables used Chat Completions JSON paths (`$.messages[0].content`). In the Apps architecture, monitoring uses `mlflow.search_traces()` instead of inference table SQL queries. This issue no longer applies.
-
----
-
-### No Champion Model for Deployment
-
-**Error:** `Registered Model Alias 'champion' does not exist.`
-
-**Context:** In Model Serving, deployment was gated by the `@champion` alias. In Apps, deployment is gated by the quality gate in NB04 (which raises an exception on failure) and triggered by CLI/CI-CD, not model promotion.

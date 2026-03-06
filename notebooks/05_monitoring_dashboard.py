@@ -387,9 +387,26 @@ def export_traces_to_eval_dataset(traces: pd.DataFrame, table_name: str):
 
     error_traces = traces[traces[_state] == "ERROR"].copy()
 
-    candidates = error_traces.head(20)
+    # Also capture traces where quality judges gave a negative assessment
+    low_quality = pd.DataFrame()
+    if "assessments" in traces.columns:
+        def _has_low_score(assessments):
+            if not assessments:
+                return False
+            for score in (assessments if isinstance(assessments, list) else []):
+                val = score.get("value") if isinstance(score, dict) else None
+                if val == "no" or val is False:
+                    return True
+            return False
+
+        mask = traces["assessments"].apply(_has_low_score)
+        low_quality = traces[mask].copy()
+
+    candidates = pd.concat([error_traces, low_quality]).drop_duplicates(
+        subset="trace_id"
+    ).head(20)
     if candidates.empty:
-        print("No error traces found to export — eval dataset unchanged")
+        print("No error or low-quality traces found — eval dataset unchanged")
         return 0
 
     export_rows = []
@@ -410,9 +427,10 @@ def export_traces_to_eval_dataset(traces: pd.DataFrame, table_name: str):
                     question = str(first)
 
         if question:
+            is_error = _state and row.get(_state) == "ERROR"
             export_rows.append({
                 "question": str(question)[:2000],
-                "source": "production_error",
+                "source": "production_error" if is_error else "production_low_quality",
                 "trace_id": row.get("trace_id", ""),
                 "exported_at": datetime.now().isoformat(),
             })

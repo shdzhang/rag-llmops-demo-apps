@@ -1,6 +1,17 @@
 bundle:
   name: "rag-llmops-demo-apps"
 
+sync:
+  exclude:
+    - docs/
+    - tests/
+    - notebooks/
+    - .github/
+    - scripts/
+    - "*.md"
+    - mlruns/
+    - "*.log"
+
 include:
   - resources/*.yml
 
@@ -40,6 +51,10 @@ variables:
   experiment_name:
     description: "MLflow experiment name"
     default: "/Users/${workspace.current_user.userName}/${bundle.target}_corp_chatbot"
+
+  workspace_host:
+    description: "Databricks workspace URL (override via CLI: -var workspace_host=...)"
+    default: "https://adb-984752964297111.11.azuredatabricks.net"
 
 resources:
   experiments:
@@ -89,12 +104,12 @@ targets:
     mode: development
     default: true
     workspace:
-      host: https://adb-984752964297111.11.azuredatabricks.net
+      host: ${var.workspace_host}
 
   prod:
     mode: production
     workspace:
-      host: https://adb-984752964297111.11.azuredatabricks.net
+      host: ${var.workspace_host}
       root_path: /Workspace/Users/shidong.zhang@databricks.com/.bundle/${bundle.name}/${bundle.target}
     resources:
       apps:

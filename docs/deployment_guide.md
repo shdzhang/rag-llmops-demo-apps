@@ -139,10 +139,27 @@ Merge to main    →  validate → evaluate (dev) → deploy prod (manual approv
 - **PR builds**: Run `validate` only (fast, no cost)
 - **Main branch**: Evaluate in dev, then promote to prod
 - **Prod promotion**: Requires manual approval via GitHub Environment protection rules
-- **Quality gate**: NB04 raises an exception if thresholds fail, blocking the pipeline
+- **Quality gate enforcement**: NB04 raises an `Exception` when quality thresholds
+  fail. This causes the Databricks job to fail, which in turn fails the CI
+  `evaluate` step and blocks `deploy-prod`. The enforcement mechanism is the
+  exception — no separate gate-check step is needed.
 - **Rollback**: `scripts/rollback.sh <target> <commit-sha>` or `git revert` + CI re-run
 - **Prompt-only changes**: Update prompt in NB03, run `build_evaluate` — no
   redeploy needed since prompts hot-reload via Prompt Registry
+
+### app.yaml and databricks.yml Sync
+
+`app.yaml` does not support DAB variable substitution (`${var.xxx}`). The
+environment variables `LLM_ENDPOINT`, `VECTOR_SEARCH_INDEX`, `PROMPT_NAME`,
+and `PROMPT_ALIAS` are hardcoded in `app.yaml` and must be updated manually
+when the corresponding variables in `databricks.yml` change.
+
+| app.yaml env var | databricks.yml variable(s) |
+|------------------|---------------------------|
+| `LLM_ENDPOINT` | `var.llm_endpoint` |
+| `VECTOR_SEARCH_INDEX` | `var.catalog_name`.`var.schema_name`.docs_index |
+| `PROMPT_NAME` | `var.catalog_name`.`var.schema_name`.`var.prompt_base_name` |
+| `PROMPT_ALIAS` | (convention: `production`) |
 
 ### GitHub Secrets Required
 
@@ -163,8 +180,9 @@ Use the provided script to roll back to any previous git commit:
 ./scripts/rollback.sh dev HEAD~1
 ```
 
-This checks out the commit, runs `databricks bundle deploy`, starts the app, and
-runs monitoring. You end up in detached HEAD state — `git checkout main` to return.
+This creates a `rollback/<target>/<short-sha>` branch from the target commit, runs
+`databricks bundle deploy`, starts the app, and runs monitoring. Run
+`git checkout main` when you're ready to return to the main branch.
 
 Alternatively, `git revert <commit>` and push to trigger CI/CD re-deployment.
 

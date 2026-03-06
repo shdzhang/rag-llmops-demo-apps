@@ -165,6 +165,29 @@ Databricks Apps shifts agents from MDLC (Model Development Lifecycle) to SDLC (S
 
 Model Serving remains the GA path for agents and is not deprecated. Choose Apps when you want faster iteration and SDLC patterns; choose Model Serving when you need inference tables or GA status for agents. See [architecture docs](docs/architecture.md) for a detailed comparison and current limitations.
 
+## Demo Flows
+
+### Prompt Iteration (Hot-Reload)
+
+Shows how prompts can be updated and evaluated without redeploying the app:
+
+1. Edit the prompt template in NB03 (`03_prompt_engineering.py`) — e.g. change tone, add citation instructions.
+2. Run `databricks bundle run build_evaluate` to register the new version and evaluate quality.
+3. NB03 sets the `@production` alias to the new version. The running app loads the prompt by alias on each request, so the change takes effect immediately — no `bundle deploy` or app restart required.
+
+### Feedback Loop (End-to-End)
+
+Shows how production issues automatically become regression test cases:
+
+1. The app generates traces for every request (via `mlflow.openai.autolog()`).
+2. NB05 (scheduled every 6h) runs the External Monitor and exports error traces **and** low-quality-scored traces to `{catalog}.{schema}.eval_dataset`.
+3. NB04 reads from that same table and includes those rows as regression test cases in the next evaluation run.
+4. If the agent now handles those cases correctly, they serve as passing regression tests. If not, the quality gate blocks deployment.
+
+### Deployment Tracking
+
+`start_server.py` calls `setup_mlflow_git_based_version_tracking()` at startup, which tags every MLflow trace with the current git commit SHA. This means any trace in the MLflow Experiment UI can be linked back to the exact code version that produced it — no additional CI metadata or tagging required.
+
 ## Technologies
 
 - **MLflow 3.x**: AgentServer, Prompt Registry, GenAI Evaluate, Tracing

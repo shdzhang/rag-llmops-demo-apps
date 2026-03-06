@@ -9,9 +9,10 @@ Uses:
 - Databricks Vector Search for retrieval
 - MLflow Prompt Registry for versioned prompt management
 - Apps user authorization for per-user UC permissions
-- DatabricksOpenAI (async) for Foundation Model API calls
+- AsyncDatabricksOpenAI for non-blocking Foundation Model API calls
 """
 
+import asyncio
 import os
 import uuid
 from typing import AsyncGenerator
@@ -46,8 +47,8 @@ _openai_client = None
 def _get_openai_client():
     global _openai_client
     if _openai_client is None:
-        from databricks_openai import DatabricksOpenAI
-        _openai_client = DatabricksOpenAI()
+        from databricks_openai import AsyncDatabricksOpenAI
+        _openai_client = AsyncDatabricksOpenAI()
     return _openai_client
 
 
@@ -85,18 +86,22 @@ def _retrieve_context(question: str) -> str:
 # ---------------------------------------------------------------------------
 # Prompt
 # ---------------------------------------------------------------------------
-def _load_and_format_prompt(context: str, question: str) -> str:
+def _load_and_format_prompt(context: str, question: str) -> tuple[str, dict]:
     """Load the prompt from MLflow Prompt Registry and fill in variables.
 
     The prompt template contains {{context}} and {{question}} placeholders.
     Loading at query time with a short alias TTL (60s default) means prompt
     updates propagate without redeploying the agent.
+
+    Returns (formatted_text, model_config) so callers can use the LLM
+    parameters registered alongside the prompt version (temperature, etc.).
     """
     try:
         prompt = mlflow.genai.load_prompt(
             f"prompts:/{PROMPT_NAME}@{PROMPT_ALIAS}"
         )
-        return prompt.format(context=context, question=question)
+        model_config = dict(prompt.model_config) if prompt.model_config else {}
+        return prompt.format(context=context, question=question), model_config
     except Exception:
         return (
             "You are a helpful corporate affairs assistant. "
@@ -104,12 +109,24 @@ def _load_and_format_prompt(context: str, question: str) -> str:
             "If you don't know, say so. Cite your sources.\n\n"
             f"Context:\n{context}\n\n"
             f"Question: {question}"
-        )
+        ), {}
 
 
 # ---------------------------------------------------------------------------
 # Streaming entry point (primary logic)
 # ---------------------------------------------------------------------------
+def _extract_message_text(msg) -> str:
+    """Extract plain text from a message's content field."""
+    if isinstance(msg.content, str):
+        return msg.content
+    if isinstance(msg.content, list):
+        return " ".join(
+            item.text if hasattr(item, "text") else str(item)
+            for item in msg.content
+        )
+    return str(msg.content) if msg.content else ""
+
+
 @stream()
 async def streaming(
     request: ResponsesAgentRequest,
@@ -117,39 +134,46 @@ async def streaming(
     """Stream agent responses using RAG.
 
     Steps:
-    1. Retrieve relevant documents from Vector Search
-    2. Load and format prompt from MLflow Prompt Registry
-    3. Stream the response from the LLM via Foundation Model API
+    1. Extract conversation history (multi-turn) and last user message
+    2. Retrieve relevant documents from Vector Search (offloaded to thread)
+    3. Load and format prompt from MLflow Prompt Registry
+    4. Stream the response from the LLM via async Foundation Model API
     """
-    user_message = ""
+    # Build conversation history; use the last user message for retrieval
+    history: list[dict[str, str]] = []
+    last_user_message = ""
     for msg in request.input:
-        if msg.role == "user":
-            if isinstance(msg.content, str):
-                user_message = msg.content
-            elif isinstance(msg.content, list):
-                user_message = " ".join(
-                    item.text if hasattr(item, "text") else str(item)
-                    for item in msg.content
-                )
+        text = _extract_message_text(msg)
+        if msg.role in ("user", "assistant"):
+            history.append({"role": msg.role, "content": text})
+        if msg.role == "user" and text:
+            last_user_message = text
 
-    context = _retrieve_context(user_message)
-    formatted_prompt = _load_and_format_prompt(context=context, question=user_message)
+    # Offload sync Vector Search SDK call to a thread to avoid blocking
+    context = await asyncio.to_thread(_retrieve_context, last_user_message)
+    formatted_prompt, model_config = _load_and_format_prompt(
+        context=context, question=last_user_message
+    )
 
-    messages = [{"role": "user", "content": formatted_prompt}]
+    # System prompt from registry, followed by full conversation history
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": formatted_prompt},
+        *history,
+    ]
 
     client = _get_openai_client()
     item_id = f"msg_{uuid.uuid4().hex[:8]}"
 
-    llm_stream = client.chat.completions.create(
+    llm_stream = await client.chat.completions.create(
         model=LLM_ENDPOINT_NAME,
         messages=messages,
-        temperature=0.1,
-        max_tokens=1000,
+        temperature=model_config.get("temperature", 0.1),
+        max_tokens=model_config.get("max_tokens", 1000),
         stream=True,
     )
 
     full_text = ""
-    for chunk in llm_stream:
+    async for chunk in llm_stream:
         delta = chunk.choices[0].delta
         if delta.content:
             full_text += delta.content

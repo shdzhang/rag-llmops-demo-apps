@@ -24,7 +24,10 @@ echo "  Rolling back to: $COMMIT"
 echo "  Current commit:  $ORIGINAL_COMMIT"
 echo ""
 
-git checkout "$COMMIT"
+SHORT_SHA=$(git rev-parse --short "$COMMIT")
+ROLLBACK_BRANCH="rollback/${TARGET}/${SHORT_SHA}"
+
+git checkout -b "$ROLLBACK_BRANCH" "$COMMIT"
 
 echo "Deploying bundle..."
 databricks bundle deploy -t "$TARGET"
@@ -38,7 +41,7 @@ databricks bundle run monitoring -t "$TARGET" || echo "WARNING: Monitoring job f
 echo ""
 echo "=== Rollback complete ==="
 echo "  Deployed commit: $(git rev-parse HEAD)"
+echo "  Branch:          $ROLLBACK_BRANCH"
 echo "  Target:          $TARGET"
 echo ""
-echo "You are now in detached HEAD state."
-echo "To return to your branch: git checkout $ORIGINAL_BRANCH"
+echo "To return to your original branch: git checkout $ORIGINAL_BRANCH"

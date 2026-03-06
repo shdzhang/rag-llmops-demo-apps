@@ -6,14 +6,9 @@ from dotenv import load_dotenv
 from mlflow.genai.agent_server import get_invoke_function
 from mlflow.genai.scorers import (
     Completeness,
-    ConversationalSafety,
-    ConversationCompleteness,
     Fluency,
-    KnowledgeRetention,
     RelevanceToQuery,
     Safety,
-    ToolCallCorrectness,
-    UserFrustration,
 )
 from mlflow.genai.simulators import ConversationSimulator
 from mlflow.types.responses import ResponsesAgentRequest
@@ -76,14 +71,9 @@ def evaluate():
         data=simulator,
         predict_fn=predict_fn,
         scorers=[
-            Completeness(),
-            ConversationCompleteness(),
-            ConversationalSafety(),
-            KnowledgeRetention(),
-            UserFrustration(),
-            Fluency(),
             RelevanceToQuery(),
             Safety(),
-            ToolCallCorrectness(),
+            Fluency(),
+            Completeness(),
         ],
     )
