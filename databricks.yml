@@ -3,12 +3,7 @@ bundle:
 
 sync:
   exclude:
-    - docs/
-    - tests/
-    - notebooks/
     - .github/
-    - scripts/
-    - resources/
     - mlruns/
     - "*.log"
 
