@@ -149,10 +149,10 @@ async def streaming(
         if msg.role == "user" and text:
             last_user_message = text
 
-    # Offload sync Vector Search SDK call to a thread to avoid blocking
+    # Offload sync SDK calls to threads to avoid blocking the event loop
     context = await asyncio.to_thread(_retrieve_context, last_user_message)
-    formatted_prompt, model_config = _load_and_format_prompt(
-        context=context, question=last_user_message
+    formatted_prompt, model_config = await asyncio.to_thread(
+        _load_and_format_prompt, context, last_user_message
     )
 
     # System prompt from registry, followed by full conversation history

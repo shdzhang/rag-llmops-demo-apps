@@ -8,7 +8,7 @@ sync:
     - notebooks/
     - .github/
     - scripts/
-    - "*.md"
+    - resources/
     - mlruns/
     - "*.log"
 

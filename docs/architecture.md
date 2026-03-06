@@ -80,7 +80,7 @@ Deployment is a CI/CD step (see `.github/workflows/deploy.yml`), not a DAB job. 
 - **Part B — Trace analytics** via `mlflow.search_traces()`
   - Query volume, latency (P50/P95/P99), error rates
   - **Threshold-based alerting**: error rate > 5%, P95 latency > 30s → alerts written to `{catalog}.{schema}.monitoring_alerts` Delta table
-- **Part C — Production feedback loop**: Exports error traces to `{catalog}.{schema}.eval_dataset` Delta table, consumed by NB04 as regression test cases
+- **Part C — Production feedback loop**: Exports error and low-quality traces to `{catalog}.{schema}.eval_dataset` Delta table, consumed by NB04 as regression test cases
 
 ## Technology Stack
 
