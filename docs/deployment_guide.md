@@ -47,7 +47,6 @@ In the Apps deployment model, the **source code is the deployment artifact**
 | `data_preparation` | 01, 02 | Once, or when documents change |
 | `build_evaluate` | 03, 04 | Each code/prompt change (inner dev loop) |
 | `monitoring` | 05 | Scheduled every 6h (health check + alerting + feedback loop) |
-| `deployment_manifest` | 06 | After each deploy (tracks git SHA, prompt version) |
 
 **Deployment is a CI/CD step** (see `.github/workflows/deploy.yml`). The pipeline evaluates in dev, then promotes to prod with manual approval.
 
@@ -133,7 +132,7 @@ Merge to main    →  validate → evaluate (dev) → deploy prod (manual approv
 |-------|-----|--------|-------------|
 | 1 | `validate` | dev + prod | Bundle validation (fast, no cost) |
 | 2 | `evaluate` | dev | Deploy infra, run `build_evaluate` (quality gate) |
-| 3 | `deploy-prod` | prod | **Manual approval**, then deploy + start app + monitoring + manifest |
+| 3 | `deploy-prod` | prod | **Manual approval**, then deploy + start app + monitoring |
 
 ### Key CI/CD Patterns
 
@@ -141,7 +140,6 @@ Merge to main    →  validate → evaluate (dev) → deploy prod (manual approv
 - **Main branch**: Evaluate in dev, then promote to prod
 - **Prod promotion**: Requires manual approval via GitHub Environment protection rules
 - **Quality gate**: NB04 raises an exception if thresholds fail, blocking the pipeline
-- **Deployment manifest**: NB06 logs git SHA, prompt version, and eval run ID to MLflow after each deploy
 - **Rollback**: `scripts/rollback.sh <target> <commit-sha>` or `git revert` + CI re-run
 - **Prompt-only changes**: Update prompt in NB03, run `build_evaluate` — no
   redeploy needed since prompts hot-reload via Prompt Registry

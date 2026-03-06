@@ -45,13 +45,11 @@ rag-llmops-demo-apps/
 │   ├── 02_vector_index_creation.py # Create Vector Search index
 │   ├── 03_prompt_engineering.py    # Register prompts in MLflow Prompt Registry
 │   ├── 04_agent_evaluation.py      # Evaluate agent + quality gates + regression cases
-│   ├── 05_monitoring_dashboard.py  # Monitoring + alerting + feedback loop
-│   └── 06_deployment_manifest.py   # Log deployment metadata to MLflow
+│   └── 05_monitoring_dashboard.py  # Monitoring + alerting + feedback loop
 ├── resources/                      # DAB resource definitions
 │   ├── data_preparation.job.yml    # Data pipeline job
 │   ├── build_evaluate.job.yml      # Prompt + evaluate pipeline job
-│   ├── monitoring.job.yml          # Production monitoring job (scheduled)
-│   └── deployment_manifest.job.yml # Deployment tracking job
+│   └── monitoring.job.yml          # Production monitoring job (scheduled)
 ├── tests/                          # Unit tests
 │   └── test_agent_local.py         # Local agent function tests
 ├── docs/                           # Documentation
@@ -116,14 +114,14 @@ uv run start-app
 ## LLMOps Lifecycle
 
 ```
-Data Prep        Develop & Evaluate     CI/CD Pipeline         Monitor & Track
-  (01, 02)         (03, 04)               (.github/workflows)    (05, 06)
+Data Prep        Develop & Evaluate     CI/CD Pipeline         Monitor
+  (01, 02)         (03, 04)               (.github/workflows)    (05)
   [run once]       [inner loop]           [on merge to main]     [scheduled 6h]
 
   Ingest docs,     Register prompts,     validate → eval →      Health check,
   create VS index  evaluate quality      dev → prod             alerting,
-                   + edge cases                                  feedback loop,
-                   + regression cases                            deployment manifest
+                   + edge cases                                  feedback loop
+                   + regression cases
 ```
 
 ### Environments
@@ -140,7 +138,6 @@ Data Prep        Develop & Evaluate     CI/CD Pipeline         Monitor & Track
 | `data_preparation` | 01, 02 | Once, or when documents change |
 | `build_evaluate` | 03, 04 | Each code/prompt change (CI quality gate) |
 | `monitoring` | 05 | Scheduled every 6h (health check + alerting + feedback loop) |
-| `deployment_manifest` | 06 | After each deploy (tracks git SHA + prompt version) |
 
 See [deployment guide](docs/deployment_guide.md) for CI/CD workflow and rollback procedures.
 
@@ -152,7 +149,7 @@ See [deployment guide](docs/deployment_guide.md) for CI/CD workflow and rollback
 | `agents.deploy(model_name, version)` | `databricks bundle deploy` |
 | Inference tables for monitoring | MLflow traces via `autolog()` |
 | 4 DAB jobs (data, build, deploy, monitor) | 3 independent DAB jobs + CI/CD deploy |
-| Old NB04-07 (log, register, deploy) | Removed — renumbered to 01-06 with feedback loop + manifest |
+| Old NB04-07 (log, register, deploy) | Removed — renumbered to 01-05 with feedback loop |
 | Single environment | dev / prod with CI/CD promotion |
 | No deployment tracking | MLflow runs with git SHA + prompt version |
 

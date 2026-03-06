@@ -3,12 +3,12 @@
 ## Apps LLMOps Pipeline
 
 ```
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│  Data Prep   │───>│  Develop &  │───>│   Deploy    │───>│  Monitor &  │───>│  Deployment │
-│  (run once)  │    │  Validate   │    │  (CI/CD)    │    │  Validate   │    │  Manifest   │
-└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
-  Notebooks:         Notebooks:         CI/CD pipeline:    Notebooks:         Notebook:
-  01, 02             03, 04             dev → prod         05                 06
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│  Data Prep   │───>│  Develop &  │───>│   Deploy    │───>│  Monitor    │
+│  (run once)  │    │  Validate   │    │  (CI/CD)    │    │  (ongoing)  │
+└─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
+  Notebooks:         Notebooks:         CI/CD pipeline:    Notebook:
+  01, 02             03, 04             dev → prod         05
                                                                 ↓
                                                      ┌──────────────────┐
                                                      │ Feedback Loop:   │
@@ -36,7 +36,6 @@ Each environment has its own app, experiment, and schema — completely isolated
 | `data_preparation` | 01, 02 | Once, or when documents change |
 | `build_evaluate` | 03, 04 | Each code/prompt change (inner dev loop) |
 | `monitoring` | 05 | Scheduled every 6h (health check + alerting + feedback loop) |
-| `deployment_manifest` | 06 | After each deploy (tracks git SHA, prompt version, eval run) |
 
 Deployment is a CI/CD step (see `.github/workflows/deploy.yml`), not a DAB job. CI evaluates in dev, then promotes to prod with manual approval.
 
@@ -82,12 +81,6 @@ Deployment is a CI/CD step (see `.github/workflows/deploy.yml`), not a DAB job. 
   - Query volume, latency (P50/P95/P99), error rates
   - **Threshold-based alerting**: error rate > 5%, P95 latency > 30s → alerts written to `{catalog}.{schema}.monitoring_alerts` Delta table
 - **Part C — Production feedback loop**: Exports error traces to `{catalog}.{schema}.eval_dataset` Delta table, consumed by NB04 as regression test cases
-
-### 6. Deployment Manifest (06)
-- Logs deployment metadata as an MLflow run with tags:
-  - Git commit SHA + branch, prompt name + version, eval run ID, app URL, timestamp
-- Answers "What version is deployed in prod right now?"
-- Queryable via `mlflow.search_runs()` with `tags.deployment.target = 'prod'`
 
 ## Technology Stack
 
@@ -163,8 +156,7 @@ Key considerations when deploying agents as Databricks Apps (vs. Model Serving E
 5. **Trace-based monitoring over inference tables**: Apps don't produce inference tables; MLflow traces via `autolog()` are the primary signal
 6. **Two environments (dev/prod)**: Dev validates before production, each with isolated resources
 7. **Production feedback loop**: Error traces automatically become regression test cases — eval dataset grows with real usage
-8. **Deployment manifest as MLflow run**: Every deployment is tracked with git SHA + prompt version — answers "what's deployed?"
-9. **Threshold-based alerting to Delta**: Monitoring alerts stored in a Delta table consumable by DBSQL Alerts or Notification Destinations
+8. **Threshold-based alerting to Delta**: Monitoring alerts stored in a Delta table consumable by DBSQL Alerts or Notification Destinations
 
 ## Comparison with Model Serving Architecture
 
@@ -179,10 +171,10 @@ Key considerations when deploying agents as Databricks Apps (vs. Model Serving E
 | Auth (Vector Search) | OBO via `CredentialStrategy` | `WorkspaceClient()` (OAuth M2M) |
 | Monitoring data source | Inference tables (automatic) | MLflow traces (via autolog) |
 | Pipeline stages | 4 chained jobs (data, build, deploy, monitor) | 3 independent jobs + CI/CD deploy |
-| Notebooks | 01-09 (all used) | 01-06 (contiguous) |
+| Notebooks | 01-09 (all used) | 01-05 (contiguous) |
 | Config management | `ModelConfig` baked into model | Env vars in `app.yaml` |
 | Environments | Single target | dev / prod (isolated) |
-| Deployment tracking | Model version in UC | MLflow run with git SHA + prompt version |
+| Deployment tracking | Model version in UC | Git history + `databricks apps get` |
 | Eval dataset | Static | Static + production regression feedback |
 | Alerting | None | Threshold-based alerts to Delta table |
 | Rollback mechanism | Revert model alias | `scripts/rollback.sh` (code) or alias change (prompts) |

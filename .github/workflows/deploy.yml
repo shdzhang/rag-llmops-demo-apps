@@ -50,5 +50,3 @@ jobs:
           databricks bundle run corp_chatbot_app -t prod
       - name: Run prod monitoring
         run: databricks bundle run monitoring -t prod
-      - name: Log deployment manifest
-        run: databricks bundle run deployment_manifest -t prod
