@@ -10,7 +10,7 @@
 # MAGIC | Stage | Notebook | Purpose |
 # MAGIC |-------|----------|---------|
 # MAGIC | **Prompt Management (here)** | 03 | Register, version, configure, smoke-test, alias |
-# MAGIC | Agent Evaluation | 05 | End-to-end evaluation (retrieval + prompt + LLM) with quality gates |
+# MAGIC | Agent Evaluation | 04 | End-to-end evaluation (retrieval + prompt + LLM) with quality gates |
 # MAGIC
 # MAGIC Systematic evaluation with `mlflow.genai.evaluate()` happens in NB04, which tests
 # MAGIC the full RAG agent holistically. This notebook focuses on the prompt artifact itself.

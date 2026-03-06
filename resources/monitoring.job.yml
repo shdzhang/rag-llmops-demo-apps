@@ -1,7 +1,7 @@
 resources:
   jobs:
     monitoring:
-      name: "Monitoring & Smoke Tests"
+      name: "Production Monitoring"
       queue:
         enabled: true
       parameters:
@@ -13,26 +13,10 @@ resources:
           default: "${resources.experiments.experiment.name}"
         - name: "app_name"
           default: "${var.app_name}"
-        - name: "llm_endpoint"
-          default: "${var.llm_endpoint}"
-        - name: "vector_search_endpoint"
-          default: "${var.vector_search_endpoint}"
       tasks:
-        - task_key: smoke_tests
-          notebook_task:
-            notebook_path: ../notebooks/05_inference_testing.py
-            base_parameters:
-              catalog_name: "{{job.parameters.catalog_name}}"
-              schema_name: "{{job.parameters.schema_name}}"
-              experiment_name: "{{job.parameters.experiment_name}}"
-              app_name: "{{job.parameters.app_name}}"
-              llm_endpoint: "{{job.parameters.llm_endpoint}}"
-              vector_search_endpoint: "{{job.parameters.vector_search_endpoint}}"
         - task_key: monitoring_dashboard
-          depends_on:
-            - task_key: smoke_tests
           notebook_task:
-            notebook_path: ../notebooks/06_monitoring_dashboard.py
+            notebook_path: ../notebooks/05_monitoring_dashboard.py
             base_parameters:
               catalog_name: "{{job.parameters.catalog_name}}"
               schema_name: "{{job.parameters.schema_name}}"

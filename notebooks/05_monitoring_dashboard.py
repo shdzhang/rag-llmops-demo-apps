@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 06 - Production Monitoring (Trace-Based)
+# MAGIC # 05 - Production Monitoring (Trace-Based)
 # MAGIC
 # MAGIC Production monitoring for the Databricks Apps agent. In the Apps model,
 # MAGIC **MLflow traces** are the primary observability signal (no inference tables).
@@ -40,6 +40,28 @@ w = WorkspaceClient()
 
 print(f"Monitoring app:     {APP_NAME}")
 print(f"Experiment:         {EXPERIMENT_NAME}")
+
+# COMMAND ----------
+# MAGIC %md
+# MAGIC ### App Health Check
+
+# COMMAND ----------
+
+import time
+
+print(f"Checking app '{APP_NAME}' status...")
+try:
+    app_info = w.apps.get(APP_NAME)
+    app_status = str(app_info.app_status.state) if app_info.app_status else "UNKNOWN"
+    compute_status = str(app_info.compute_status.state) if app_info.compute_status else "UNKNOWN"
+    app_url = getattr(app_info, "url", "N/A")
+    print(f"  App status:     {app_status}")
+    print(f"  Compute status: {compute_status}")
+    print(f"  URL:            {app_url}")
+    if "FAILED" in app_status or "ERROR" in app_status:
+        print(f"  WARNING: App is in {app_status} state!")
+except Exception as e:
+    print(f"  Could not check app status: {e}")
 
 # COMMAND ----------
 # MAGIC %md

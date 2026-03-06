@@ -18,7 +18,7 @@ resources:
       tasks:
         - task_key: log_manifest
           notebook_task:
-            notebook_path: ../notebooks/07_deployment_manifest.py
+            notebook_path: ../notebooks/06_deployment_manifest.py
             base_parameters:
               catalog_name: "{{job.parameters.catalog_name}}"
               schema_name: "{{job.parameters.schema_name}}"

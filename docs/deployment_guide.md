@@ -34,9 +34,8 @@ In the Apps deployment model, the **source code is the deployment artifact**
 │    databricks bundle deploy -t prod                      │
 │    databricks bundle run corp_chatbot_app -t prod        │
 │                                                          │
-│  Stage 4: MONITOR & VALIDATE (ongoing, scheduled)        │
-│    05_inference_testing (smoke tests)                     │
-│    06_monitoring_dashboard (trace-based monitoring)       │
+│  Stage 4: MONITOR (ongoing, scheduled)                    │
+│    05_monitoring_dashboard (health check + trace monitor) │
 │                                                          │
 └──────────────────────────────────────────────────────────┘
 ```
@@ -47,8 +46,8 @@ In the Apps deployment model, the **source code is the deployment artifact**
 |-----|-----------|-------------|
 | `data_preparation` | 01, 02 | Once, or when documents change |
 | `build_evaluate` | 03, 04 | Each code/prompt change (inner dev loop) |
-| `monitoring` | 05, 06 | Scheduled every 6h (post-deploy validation + alerting) |
-| `deployment_manifest` | 07 | After each deploy (tracks git SHA, prompt version) |
+| `monitoring` | 05 | Scheduled every 6h (health check + alerting + feedback loop) |
+| `deployment_manifest` | 06 | After each deploy (tracks git SHA, prompt version) |
 
 **Deployment is a CI/CD step** (see `.github/workflows/deploy.yml`). The pipeline evaluates in dev, then promotes to prod with manual approval.
 
@@ -89,7 +88,7 @@ databricks bundle run build_evaluate -t prod
 # Start the app
 databricks bundle run corp_chatbot_app -t prod
 
-# Run smoke tests + set up monitoring
+# Set up production monitoring
 databricks bundle run monitoring -t prod
 ```
 
@@ -105,7 +104,7 @@ databricks bundle run build_evaluate -t prod
 databricks bundle deploy -t prod
 databricks bundle run corp_chatbot_app -t prod
 
-# 3. Validate + monitor
+# 3. Run monitoring
 databricks bundle run monitoring -t prod
 ```
 
@@ -134,7 +133,7 @@ Merge to main    →  validate → evaluate (dev) → deploy prod (manual approv
 |-------|-----|--------|-------------|
 | 1 | `validate` | dev + prod | Bundle validation (fast, no cost) |
 | 2 | `evaluate` | dev | Deploy infra, run `build_evaluate` (quality gate) |
-| 3 | `deploy-prod` | prod | **Manual approval**, then deploy + start app + smoke test + manifest |
+| 3 | `deploy-prod` | prod | **Manual approval**, then deploy + start app + monitoring + manifest |
 
 ### Key CI/CD Patterns
 
@@ -142,7 +141,7 @@ Merge to main    →  validate → evaluate (dev) → deploy prod (manual approv
 - **Main branch**: Evaluate in dev, then promote to prod
 - **Prod promotion**: Requires manual approval via GitHub Environment protection rules
 - **Quality gate**: NB04 raises an exception if thresholds fail, blocking the pipeline
-- **Deployment manifest**: NB07 logs git SHA, prompt version, and eval run ID to MLflow after each deploy
+- **Deployment manifest**: NB06 logs git SHA, prompt version, and eval run ID to MLflow after each deploy
 - **Rollback**: `scripts/rollback.sh <target> <commit-sha>` or `git revert` + CI re-run
 - **Prompt-only changes**: Update prompt in NB03, run `build_evaluate` — no
   redeploy needed since prompts hot-reload via Prompt Registry
@@ -167,7 +166,7 @@ Use the provided script to roll back to any previous git commit:
 ```
 
 This checks out the commit, runs `databricks bundle deploy`, starts the app, and
-runs smoke tests. You end up in detached HEAD state — `git checkout main` to return.
+runs monitoring. You end up in detached HEAD state — `git checkout main` to return.
 
 Alternatively, `git revert <commit>` and push to trigger CI/CD re-deployment.
 

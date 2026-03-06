@@ -13,7 +13,7 @@ Issues encountered during development and deployment. Each entry includes the er
 5. [Databricks Asset Bundles](#5-databricks-asset-bundles)
 6. [Databricks Apps Deployment](#6-databricks-apps-deployment)
 7. [Databricks Apps Runtime](#7-databricks-apps-runtime)
-8. [Notebook Smoke Tests (NB04)](#8-notebook-smoke-tests-nb05)
+8. [Apps OAuth & Programmatic Testing](#8-apps-oauth--programmatic-testing)
 9. [Quick Reference](#9-quick-reference)
 10. [Historical: Model Serving Issues](#10-historical-model-serving-issues)
 
@@ -104,7 +104,7 @@ mlflow.set_experiment(EXPERIMENT_NAME)
 **Cause:** 3 scorers x 12 test cases = 36 judge calls hitting a rate-limited endpoint, each sending large prompts.
 
 **Fix:**
-1. **1 scorer** (`Correctness` only) — additional quality checks run in production via External Monitor (NB06)
+1. **1 scorer** (`Correctness` only) — additional quality checks run in production via External Monitor (NB05)
 2. **Claude Opus 4.1** as judge (`databricks:/databricks-claude-opus-4-1`)
 3. **8 test cases** (down from 12)
 4. Concurrency env vars: `MLFLOW_GENAI_EVAL_MAX_WORKERS=4`, `MLFLOW_GENAI_EVAL_MAX_SCORER_WORKERS=2`
@@ -149,13 +149,13 @@ safe_cols = [c for c in ["trace_id", "status", "execution_time_ms"] if c in resu
 print(results_df[safe_cols].to_string() if safe_cols else f"{len(results_df)} traces found")
 ```
 
-**Applies to:** Any notebook that calls `display()` on `mlflow.search_traces()` output (NB04, NB06).
+**Applies to:** Any notebook that calls `display()` on `mlflow.search_traces()` output (NB04, NB05).
 
 ---
 
 ### 3.6 `mlflow.search_traces()` Column Names Don't Match Documentation
 
-**Symptom:** NB06 analytics sections (volume, latency, errors) all print "No column found" — the code runs without errors but produces no useful output.
+**Symptom:** NB05 analytics sections (volume, latency, errors) all print "No column found" — the code runs without errors but produces no useful output.
 
 **Cause:** `mlflow.search_traces()` returns columns with different names than commonly documented:
 
@@ -272,7 +272,7 @@ Unable to access the notebook ".../04_agent_evaluation" in the workspace.
 
 **Symptom:** Two experiments in the MLflow UI: one with the `[dev ...]` prefix (correct) and one without (stray).
 
-**Cause:** `monitoring.job.yml` used `${var.experiment_name}` for its parameter default. In `mode: development`, DAB prefixes **resource** names but does **not** prefix raw **variable** values. When NB06 called `mlflow.set_experiment("dev_corp_chatbot")`, MLflow created a new experiment without the prefix.
+**Cause:** `monitoring.job.yml` used `${var.experiment_name}` for its parameter default. In `mode: development`, DAB prefixes **resource** names but does **not** prefix raw **variable** values. When NB05 called `mlflow.set_experiment("dev_corp_chatbot")`, MLflow created a new experiment without the prefix.
 
 **Fix:** Changed the default from `${var.experiment_name}` to `${resources.experiments.experiment.name}`:
 ```yaml
@@ -521,43 +521,9 @@ resources:
 
 ---
 
-## 8. Notebook Smoke Tests (NB05/NB06)
+## 8. Apps OAuth & Programmatic Testing
 
-### 8.1 `NotFound` When Querying App via `w.api_client.do()`
-
-**Error:**
-```
-NotFound: Not Found
-```
-
-**Cause:** NB05 originally called `w.api_client.do("POST", f"/apps/{APP_NAME}/invocations", body=payload)`. The Databricks SDK sends this to `https://<workspace>/apps/<name>/invocations`, but the workspace API does not have a REST endpoint at that path — the `/apps/<name>/` path is a web proxy, not a REST API route.
-
-**Fix:** See 8.3 for the final solution.
-
----
-
-### 8.2 `JSONDecodeError` — App Returns Login Page, Not JSON
-
-**Error:**
-```
-JSONDecodeError: Expecting value: line 1 column 1 (char 0)
-```
-
-**Cause:** After switching to direct HTTP calls (`requests.post(f"{APP_URL}/invocations", ...)`), the app responded with HTTP 200 but the body was the Databricks **Sign In HTML page** (25KB of HTML). The `Content-Type` was `text/html`, not `application/json`.
-
-**Debug evidence:**
-```
-status=200 content_type=text/html; charset=utf-8 body_len=25658
-url=https://adb-xxx.azuredatabricks.net/login.html?...redirect_uri=...corp-chatbot-app.../.auth/callback
-```
-
-**Root cause:** Databricks Apps with **user authorization** require browser-based OAuth. Neither the notebook's workspace API token (`dbutils.notebook.entry_point...apiToken().get()`) nor the workspace proxy (`<workspace-url>/apps/<name>/`) accepts Bearer tokens. Both redirect to the OAuth login flow.
-
-**Fix:** See 8.3.
-
----
-
-### 8.3 Apps Cannot Be Queried Programmatically from Notebooks (OAuth)
+### 8.1 Apps Cannot Be Queried Programmatically from Notebooks (OAuth)
 
 **Problem:** When user authorization is enabled, Databricks Apps require browser-based OAuth for all requests — including `/invocations`. There is no programmatic HTTP endpoint that accepts workspace API tokens.
 
@@ -567,23 +533,13 @@ Attempted approaches (all failed):
 3. Adding `"stream": False` to payload → no effect on auth
 4. SDK `w.api_client.do()` → 404 (path is a web proxy, not REST API)
 
-**Solution:** NB05 now imports and calls the agent functions directly — the same code path the deployed app runs:
-```python
-from agent_server.agent import _retrieve_context, _load_and_format_prompt, _get_openai_client, LLM_ENDPOINT_NAME
-
-def query_agent(question, max_output_tokens=500):
-    context = _retrieve_context(question)
-    formatted_prompt = _load_and_format_prompt(context=context, question=question)
-    messages = [{"role": "user", "content": formatted_prompt}]
-    client = _get_openai_client()
-    response = client.chat.completions.create(
-        model=LLM_ENDPOINT_NAME, messages=messages,
-        temperature=0.1, max_tokens=max_output_tokens,
-    )
-    return {"answer": response.choices[0].message.content}
+**Debug evidence:**
+```
+status=200 content_type=text/html; charset=utf-8 body_len=25658
+url=https://adb-xxx.azuredatabricks.net/login.html?...redirect_uri=...corp-chatbot-app.../.auth/callback
 ```
 
-This tests the full RAG pipeline (vector search → prompt → LLM) while the app status is verified separately via `w.apps.get(APP_NAME)`.
+**Solution:** NB04 (evaluation) imports and calls the agent functions directly — the same code path the deployed app runs. App health is verified via `w.apps.get(APP_NAME)` in NB05 (monitoring).
 
 **Key takeaway:** For Databricks Apps with user authorization, programmatic testing must call the agent code directly. HTTP-level testing requires browser-based OAuth or disabling user authorization.
 
@@ -686,7 +642,7 @@ The following issues were encountered during the original Model Serving deployme
 
 ### Endpoint Readiness Check Loops Forever
 
-**Context:** Model Serving endpoints required polling `config_update` status with substring checks (`"READY" in str(state.ready)`). Apps use `w.apps.get(APP_NAME)` and check `app_status.state` instead (see NB05).
+**Context:** Model Serving endpoints required polling `config_update` status with substring checks (`"READY" in str(state.ready)`). Apps use `w.apps.get(APP_NAME)` and check `app_status.state` instead (see NB05 monitoring).
 
 ---
 

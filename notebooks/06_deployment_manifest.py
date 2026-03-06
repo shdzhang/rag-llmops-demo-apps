@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 07 - Deployment Manifest
+# MAGIC # 06 - Deployment Manifest
 # MAGIC
 # MAGIC Logs a deployment record to the MLflow experiment as a run with metadata tags.
 # MAGIC Answers: "What version is deployed in this environment right now?"

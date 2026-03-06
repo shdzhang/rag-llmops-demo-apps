@@ -10,7 +10,7 @@ In Databricks Apps, **source code is the deployment artifact** — not an MLflow
 edit code  ->  evaluate(code)  ->  git commit  ->  bundle deploy
 ```
 
-Prompts hot-reload via MLflow Prompt Registry (no redeploy needed). Quality gates run in NB04 and block deployment if thresholds fail.
+Prompts hot-reload via MLflow Prompt Registry (no redeploy needed). Quality gates run in NB04 (including edge cases) and block deployment if thresholds fail.
 
 ## Key Features
 
@@ -45,13 +45,12 @@ rag-llmops-demo-apps/
 │   ├── 02_vector_index_creation.py # Create Vector Search index
 │   ├── 03_prompt_engineering.py    # Register prompts in MLflow Prompt Registry
 │   ├── 04_agent_evaluation.py      # Evaluate agent + quality gates + regression cases
-│   ├── 05_inference_testing.py     # Post-deploy smoke tests (direct function import)
-│   ├── 06_monitoring_dashboard.py  # Monitoring + alerting + feedback loop
-│   └── 07_deployment_manifest.py   # Log deployment metadata to MLflow
+│   ├── 05_monitoring_dashboard.py  # Monitoring + alerting + feedback loop
+│   └── 06_deployment_manifest.py   # Log deployment metadata to MLflow
 ├── resources/                      # DAB resource definitions
 │   ├── data_preparation.job.yml    # Data pipeline job
 │   ├── build_evaluate.job.yml      # Prompt + evaluate pipeline job
-│   ├── monitoring.job.yml          # Smoke tests + monitoring job (scheduled)
+│   ├── monitoring.job.yml          # Production monitoring job (scheduled)
 │   └── deployment_manifest.job.yml # Deployment tracking job
 ├── tests/                          # Unit tests
 │   └── test_agent_local.py         # Local agent function tests
@@ -82,39 +81,49 @@ cd rag-llmops-demo-apps
 uv run quickstart
 ```
 
-### 2. Test Locally
+### 2. Deploy Infrastructure & Data
+
+```bash
+# Deploy bundle (creates schema, experiment, app resource, jobs)
+databricks bundle deploy -t prod
+
+# Ingest documents and create Vector Search index (run once)
+databricks bundle run data_preparation -t prod
+```
+
+Wait for the data preparation job to complete (~5-10 min) before proceeding.
+
+### 3. Evaluate & Deploy App
+
+```bash
+# Evaluate agent quality (prompt engineering + quality gates)
+databricks bundle run build_evaluate -t prod
+
+# Start the app
+databricks bundle run corp_chatbot_app -t prod
+
+# Set up production monitoring
+databricks bundle run monitoring -t prod
+```
+
+### 4. Test Locally (Optional)
 
 ```bash
 uv run start-app
 # Open http://localhost:8000 for the chat UI
 ```
 
-### 3. Deploy to Databricks
-
-```bash
-databricks bundle deploy -t prod
-databricks bundle run corp_chatbot_app -t prod
-```
-
-### 4. Run Individual Jobs
-
-```bash
-databricks bundle run data_preparation -t prod   # Run once to set up data
-databricks bundle run build_evaluate -t prod      # Evaluate agent quality
-databricks bundle run monitoring -t prod          # Smoke tests + monitoring
-```
-
 ## LLMOps Lifecycle
 
 ```
 Data Prep        Develop & Evaluate     CI/CD Pipeline         Monitor & Track
-  (01, 02)         (03, 04)               (.github/workflows)    (05, 06, 07)
+  (01, 02)         (03, 04)               (.github/workflows)    (05, 06)
   [run once]       [inner loop]           [on merge to main]     [scheduled 6h]
 
-  Ingest docs,     Register prompts,     validate → eval →      Smoke tests,
+  Ingest docs,     Register prompts,     validate → eval →      Health check,
   create VS index  evaluate quality      dev → prod             alerting,
-                   + regression cases                            feedback loop,
-                                                                 deployment manifest
+                   + edge cases                                  feedback loop,
+                   + regression cases                            deployment manifest
 ```
 
 ### Environments
@@ -130,8 +139,8 @@ Data Prep        Develop & Evaluate     CI/CD Pipeline         Monitor & Track
 |-----|-----------|-------------|
 | `data_preparation` | 01, 02 | Once, or when documents change |
 | `build_evaluate` | 03, 04 | Each code/prompt change (CI quality gate) |
-| `monitoring` | 05, 06 | Scheduled every 6h (smoke tests + alerting + feedback loop) |
-| `deployment_manifest` | 07 | After each deploy (tracks git SHA + prompt version) |
+| `monitoring` | 05 | Scheduled every 6h (health check + alerting + feedback loop) |
+| `deployment_manifest` | 06 | After each deploy (tracks git SHA + prompt version) |
 
 See [deployment guide](docs/deployment_guide.md) for CI/CD workflow and rollback procedures.
 
@@ -142,8 +151,8 @@ See [deployment guide](docs/deployment_guide.md) for CI/CD workflow and rollback
 | `mlflow.pyfunc.log_model()` -> register -> promote `@champion` | Edit code, evaluate, git commit |
 | `agents.deploy(model_name, version)` | `databricks bundle deploy` |
 | Inference tables for monitoring | MLflow traces via `autolog()` |
-| 4 DAB jobs (data, build, deploy, monitor) | 4 independent DAB jobs + CI/CD deploy |
-| Old NB04-07 (log, register, deploy) | Removed — renumbered to 01-07 with feedback loop + manifest |
+| 4 DAB jobs (data, build, deploy, monitor) | 3 independent DAB jobs + CI/CD deploy |
+| Old NB04-07 (log, register, deploy) | Removed — renumbered to 01-06 with feedback loop + manifest |
 | Single environment | dev / prod with CI/CD promotion |
 | No deployment tracking | MLflow runs with git SHA + prompt version |
 

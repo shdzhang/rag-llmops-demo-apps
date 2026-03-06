@@ -8,7 +8,7 @@
 │  (run once)  │    │  Validate   │    │  (CI/CD)    │    │  Validate   │    │  Manifest   │
 └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
   Notebooks:         Notebooks:         CI/CD pipeline:    Notebooks:         Notebook:
-  01, 02             03, 04             dev → prod         05, 06             07
+  01, 02             03, 04             dev → prod         05                 06
                                                                 ↓
                                                      ┌──────────────────┐
                                                      │ Feedback Loop:   │
@@ -17,7 +17,7 @@
                                                      └────────┬─────────┘
                                                               ↓
                                                      Back to NB04 as
-                                                     regression cases
+                                                     regression test cases
 ```
 
 ### Environments
@@ -35,8 +35,8 @@ Each environment has its own app, experiment, and schema — completely isolated
 |-----|-----------|-------------|
 | `data_preparation` | 01, 02 | Once, or when documents change |
 | `build_evaluate` | 03, 04 | Each code/prompt change (inner dev loop) |
-| `monitoring` | 05, 06 | Scheduled every 6h (post-deploy validation + alerting) |
-| `deployment_manifest` | 07 | After each deploy (tracks git SHA, prompt version, eval run) |
+| `monitoring` | 05 | Scheduled every 6h (health check + alerting + feedback loop) |
+| `deployment_manifest` | 06 | After each deploy (tracks git SHA, prompt version, eval run) |
 
 Deployment is a CI/CD step (see `.github/workflows/deploy.yml`), not a DAB job. CI evaluates in dev, then promotes to prod with manual approval.
 
@@ -60,7 +60,7 @@ Deployment is a CI/CD step (see `.github/workflows/deploy.yml`), not a DAB job. 
   - Static eval dataset + **production regression cases** from `{catalog}.{schema}.eval_dataset`
   - **mlflow.genai.evaluate()** with `Correctness` scorer
   - Quality gates: fails the pipeline if thresholds not met
-- **Tier 3 (production, continuous)**: External Monitor judges (NB06)
+- **Tier 3 (production, continuous)**: External Monitor judges (NB05)
   - Feeds back low-quality traces as regression test cases (closes the loop)
 
 ### 4. Deployment (CI/CD Pipeline)
@@ -72,22 +72,18 @@ Deployment is a CI/CD step (see `.github/workflows/deploy.yml`), not a DAB job. 
 - App service principal gets auto-provisioned grants
 - Git commit = version; rollback = `scripts/rollback.sh` or `git revert` + CI re-run
 
-### 5. Smoke Tests & Monitoring (05, 06)
-- **NB05:** Post-deploy smoke tests
-  - Verifies app status via SDK, then calls agent code directly
-  - Basic queries, edge cases, latency benchmarks
-  - Uses direct function import (Apps with user auth require browser OAuth)
-- **NB06:** Trace-based production monitoring with three parts:
-  - **Part A — MLflow External Monitor**: Automated quality assessment
-    - Built-in judges: safety, groundedness, relevance
-    - Custom guideline judges: accuracy, professional tone
-    - Configurable sampling rate
-  - **Part B — Trace analytics** via `mlflow.search_traces()`
-    - Query volume, latency (P50/P95/P99), error rates
-    - **Threshold-based alerting**: error rate > 5%, P95 latency > 30s → alerts written to `{catalog}.{schema}.monitoring_alerts` Delta table
-  - **Part C — Production feedback loop**: Exports error traces to `{catalog}.{schema}.eval_dataset` Delta table, consumed by NB04 as regression test cases
+### 5. Production Monitoring (05)
+- **App health check**: Verifies app status via SDK before analyzing traces
+- **Part A — MLflow External Monitor**: Automated quality assessment
+  - Built-in judges: safety, groundedness, relevance
+  - Custom guideline judges: accuracy, professional tone
+  - Configurable sampling rate
+- **Part B — Trace analytics** via `mlflow.search_traces()`
+  - Query volume, latency (P50/P95/P99), error rates
+  - **Threshold-based alerting**: error rate > 5%, P95 latency > 30s → alerts written to `{catalog}.{schema}.monitoring_alerts` Delta table
+- **Part C — Production feedback loop**: Exports error traces to `{catalog}.{schema}.eval_dataset` Delta table, consumed by NB04 as regression test cases
 
-### 6. Deployment Manifest (07)
+### 6. Deployment Manifest (06)
 - Logs deployment metadata as an MLflow run with tags:
   - Git commit SHA + branch, prompt name + version, eval run ID, app URL, timestamp
 - Answers "What version is deployed in prod right now?"
@@ -182,8 +178,8 @@ Key considerations when deploying agents as Databricks Apps (vs. Model Serving E
 | Deployment | `agents.deploy(model, version)` | `databricks bundle deploy` |
 | Auth (Vector Search) | OBO via `CredentialStrategy` | `WorkspaceClient()` (OAuth M2M) |
 | Monitoring data source | Inference tables (automatic) | MLflow traces (via autolog) |
-| Pipeline stages | 4 chained jobs (data, build, deploy, monitor) | 4 independent jobs + CI/CD deploy |
-| Notebooks | 01-09 (all used) | 01-07 (contiguous) |
+| Pipeline stages | 4 chained jobs (data, build, deploy, monitor) | 3 independent jobs + CI/CD deploy |
+| Notebooks | 01-09 (all used) | 01-06 (contiguous) |
 | Config management | `ModelConfig` baked into model | Env vars in `app.yaml` |
 | Environments | Single target | dev / prod (isolated) |
 | Deployment tracking | Model version in UC | MLflow run with git SHA + prompt version |

@@ -32,8 +32,8 @@ databricks bundle deploy -t "$TARGET"
 echo "Starting app..."
 databricks bundle run corp_chatbot_app -t "$TARGET"
 
-echo "Running smoke tests..."
-databricks bundle run monitoring -t "$TARGET" || echo "WARNING: Smoke tests failed after rollback"
+echo "Running monitoring..."
+databricks bundle run monitoring -t "$TARGET" || echo "WARNING: Monitoring job failed after rollback"
 
 echo ""
 echo "=== Rollback complete ==="
